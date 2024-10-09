@@ -229,7 +229,7 @@ void PopulateTreeViewWithBluetoothDevices(HWND hTreeView) {
     if (bluetoothDeviceCount == 0) {
         MessageBoxW(NULL, L"Bluetooth устройства не найдены", L"Информация", MB_OK);
     }
-}
+}    
 
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
