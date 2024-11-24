@@ -13,7 +13,10 @@
 #pragma comment(lib, "Bthprops.lib")
 #pragma comment(lib, "wbemuuid.lib")
 #pragma comment(lib, "comsupp.lib")
+
 #define MAX_BUFFER_SIZE 256
+#define CONFIGFLAG_DISABLED 0x00000001
+#define CONFIGFLAG_FAILEDINSTALL 0x00000002
 
 struct DeviceInfo 
 {
@@ -33,4 +36,7 @@ struct Map
 HRESULT InitWMI(IWbemLocator** pLoc, IWbemServices** pSvc);
 Map* FullQueryDevices(IWbemServices* pSvc, const wchar_t* query, int* count);
 DeviceInfo* QueryDevices(IWbemServices* pSvc, const wchar_t* query, int* count);
-BOOL IsDeviceConnected(IWbemServices* pSvc, const WCHAR* deviceID);
+BOOL IsBluetoothDeviceConnected(const WCHAR* deviceName);
+BOOL ChangeDeviceState(const WCHAR* deviceID, BOOL connected);
+DeviceInfo* ListConnectedUSBDevices(int* deviceCount);
+BOOL IsUsbDeviceConnected(IWbemServices* pSvc, const WCHAR* deviceID);

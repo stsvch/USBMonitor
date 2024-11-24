@@ -62,7 +62,8 @@ Map* FullQueryDevices(IWbemServices* pSvc, const wchar_t* query, int* count)
     IWbemClassObject* pclsObj = NULL;
     ULONG uReturn = 0;
 
-    while (true) {
+    while (true) 
+    {
         hres = pEnumerator->Next(WBEM_INFINITE, 1, &pclsObj, &uReturn);
         if (FAILED(hres) || uReturn == 0) 
         {
@@ -90,7 +91,6 @@ Map* FullQueryDevices(IWbemServices* pSvc, const wchar_t* query, int* count)
             hres = pclsObj->Get(propertyName, 0, &vtProp, 0, 0);
             if (SUCCEEDED(hres)) 
             {
-
                 if (*count == capacity) 
                 {
                     capacity *= 2; 
@@ -137,7 +137,6 @@ Map* FullQueryDevices(IWbemServices* pSvc, const wchar_t* query, int* count)
                     wcsncpy_s(results[*count].Value, L"(unknown type)", MAX_BUFFER_SIZE - 1);
                     break;
                 }
-
                 ++(*count); 
             }
 
@@ -173,11 +172,12 @@ DeviceInfo* QueryDevices(IWbemServices* pSvc, const wchar_t* query, int* count)
     IWbemClassObject* pclsObj = NULL;
     ULONG uReturn = 0;
 
-    size_t capacity = 10; 
+    size_t capacity = 20; 
     *count = 0;
     DeviceInfo* devices = new DeviceInfo[capacity]; 
 
-    while (true) {
+    while (true) 
+    {
         hres = pEnumerator->Next(WBEM_INFINITE, 1, &pclsObj, &uReturn);
         if (FAILED(hres)) break;
         if (uReturn == 0) break;
@@ -254,6 +254,62 @@ DeviceInfo* QueryDevices(IWbemServices* pSvc, const wchar_t* query, int* count)
     return devices; 
 }
 
+BOOL IsUsbDeviceConnected(IWbemServices* pSvc, const WCHAR* deviceID)
+{
+    HRESULT hres;
+
+    WCHAR query[512];  
+    swprintf_s(query, 512, L"SELECT * FROM Win32_PnPEntity WHERE DeviceID = '%s'", deviceID);
+
+    IEnumWbemClassObject* pEnumerator = NULL;
+    hres = pSvc->ExecQuery(bstr_t(L"WQL"), bstr_t(query),
+        WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
+        NULL, &pEnumerator);
+
+    if (FAILED(hres)) return FALSE; 
+
+    IWbemClassObject* pClassObject = NULL;
+    ULONG returnCount = 0;
+    BOOL isConnected = FALSE;
+
+    while (true)
+    {
+        hres = pEnumerator->Next(WBEM_INFINITE, 1, &pClassObject, &returnCount);
+        if (returnCount == 0) break;  
+
+        VARIANT vtProp;
+
+        hres = pClassObject->Get(L"Status", 0, &vtProp, 0, 0);
+        if (FAILED(hres)) 
+        {
+            pClassObject->Release();
+            continue;  
+        }
+
+        if (wcscmp(vtProp.bstrVal, L"OK") == 0)
+        {
+            isConnected = TRUE;
+        }
+
+        VariantClear(&vtProp);
+
+        hres = pClassObject->Get(L"ConfigManagerErrorCode", 0, &vtProp, 0, 0);
+        if (SUCCEEDED(hres)) 
+        {
+            if (vtProp.intVal != 0) 
+            {  
+                isConnected = FALSE;
+            }
+        }
+        VariantClear(&vtProp);
+
+        pClassObject->Release();
+        break;  
+    }
+    pEnumerator->Release();
+    return isConnected; 
+}
+
 BOOL IsBluetoothDeviceConnected(const WCHAR* deviceName) 
 {
     BLUETOOTH_DEVICE_SEARCH_PARAMS searchParams;
@@ -270,12 +326,7 @@ BOOL IsBluetoothDeviceConnected(const WCHAR* deviceName)
     deviceInfo.dwSize = sizeof(BLUETOOTH_DEVICE_INFO);
 
     hFind = BluetoothFindFirstDevice(&searchParams, &deviceInfo);
-    if (hFind == NULL) 
-    {
-        wprintf(L"Ошибка поиска Bluetooth устройств или нет подключенных устройств.\n");
-        return FALSE;
-    }
-
+    if (hFind == NULL) return FALSE;
     do 
     {
         if (_wcsicmp(deviceInfo.szName, deviceName) == 0) 
@@ -296,3 +347,113 @@ BOOL IsBluetoothDeviceConnected(const WCHAR* deviceName)
     BluetoothFindDeviceClose(hFind);
     return FALSE;
 }
+
+BOOL ChangeDeviceState(const WCHAR* deviceID, BOOL connected)
+{
+    HDEVINFO hDevInfo = SetupDiGetClassDevs(NULL, NULL, NULL, DIGCF_ALLCLASSES | DIGCF_PRESENT);
+    if (hDevInfo == INVALID_HANDLE_VALUE) return FALSE;
+
+    SP_DEVINFO_DATA devInfoData;
+    devInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
+
+    DWORD index = 0;
+    while (SetupDiEnumDeviceInfo(hDevInfo, index++, &devInfoData))
+    {
+        WCHAR currentDeviceID[MAX_DEVICE_ID_LEN];
+        if (SetupDiGetDeviceInstanceIdW(hDevInfo, &devInfoData, currentDeviceID, MAX_DEVICE_ID_LEN, NULL))
+        {
+            if (_wcsicmp(currentDeviceID, deviceID) == 0)
+            {
+                SP_PROPCHANGE_PARAMS propChangeParams;
+                propChangeParams.ClassInstallHeader.cbSize = sizeof(SP_CLASSINSTALL_HEADER);
+                propChangeParams.ClassInstallHeader.InstallFunction = DIF_PROPERTYCHANGE;
+                propChangeParams.StateChange = connected ? DICS_DISABLE: DICS_ENABLE;
+                propChangeParams.Scope = DICS_FLAG_GLOBAL;
+                propChangeParams.HwProfile = 0;
+
+                if (!SetupDiSetClassInstallParams(hDevInfo, &devInfoData,
+                    (SP_CLASSINSTALL_HEADER*)&propChangeParams,
+                    sizeof(SP_PROPCHANGE_PARAMS)))
+                {
+                    SetupDiDestroyDeviceInfoList(hDevInfo);
+                    return FALSE;
+                }
+
+                if (!SetupDiChangeState(hDevInfo, &devInfoData))
+                {
+                    SetupDiDestroyDeviceInfoList(hDevInfo);
+                    return FALSE;
+                }
+                SetupDiDestroyDeviceInfoList(hDevInfo);
+                return TRUE;
+            }
+        }
+    }
+    SetupDiDestroyDeviceInfoList(hDevInfo);
+    return FALSE;
+}
+
+DeviceInfo* ListConnectedUSBDevices(int* deviceCount) 
+{
+    *deviceCount = 0; 
+
+    HDEVINFO deviceInfoSet = SetupDiGetClassDevs(
+        NULL,
+        L"USB",
+        NULL,
+        DIGCF_PRESENT | DIGCF_ALLCLASSES
+    );
+
+    if (deviceInfoSet == INVALID_HANDLE_VALUE) return NULL;
+
+    SP_DEVINFO_DATA deviceInfoData;
+    deviceInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
+
+    int capacity = 10;
+    DeviceInfo* devices = new DeviceInfo[capacity];
+
+    for (int i = 0; SetupDiEnumDeviceInfo(deviceInfoSet, i, &deviceInfoData); ++i) 
+    {
+        if (*deviceCount >= capacity) {
+            capacity *= 2; 
+            DeviceInfo* newDevices = new DeviceInfo[capacity];
+            memcpy(newDevices, devices, sizeof(DeviceInfo) * (*deviceCount)); 
+            delete[] devices; 
+            devices = newDevices; 
+        }
+
+        DeviceInfo& device = devices[*deviceCount];
+
+        if (SetupDiGetDeviceRegistryProperty(
+            deviceInfoSet,
+            &deviceInfoData,
+            SPDRP_DEVICEDESC,
+            NULL,
+            (PBYTE)device.Caption,
+            sizeof(device.Caption),
+            NULL))
+        {
+        }
+        else 
+        {
+            wcscpy_s(device.Caption, L"Unknown Device");
+        }
+
+        if (SetupDiGetDeviceInstanceId(
+            deviceInfoSet,
+            &deviceInfoData,
+            device.DeviceID,
+            sizeof(device.DeviceID),
+            NULL))
+        {
+        }
+        else 
+        {
+            wcscpy_s(device.DeviceID, L"Unknown Device ID");
+        }
+        ++(*deviceCount); 
+    }
+    SetupDiDestroyDeviceInfoList(deviceInfoSet);
+    return devices; 
+}
+
