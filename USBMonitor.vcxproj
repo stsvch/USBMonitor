@@ -130,6 +130,7 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="resource.h" />
+    <ClCompile Include="usb_utils.cpp" />
     <ClCompile Include="wmi_utils.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -141,6 +142,8 @@
     </Image>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="global.h" />
+    <ClInclude Include="usb_utils.h" />
     <ClInclude Include="wmi_utils.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

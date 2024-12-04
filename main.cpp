@@ -1,8 +1,7 @@
 #include "wmi_utils.h"
+#include "usb_utils.h"
 #include <windows.h>
 #include <commctrl.h>
-#include <chrono>
-#include <thread>
 
 #pragma comment(lib, "comctl32.lib")
 
@@ -20,6 +19,7 @@ int bluetoothDeviceProfileCount = 0;
 IWbemLocator* pLoc = NULL;
 IWbemServices* pSvc = NULL;
 int selectedIndex=-2;
+
 
 void ClearUSBList()
 {
@@ -57,7 +57,7 @@ void EscapeBackslashes(WCHAR* str)
     }
 }
 
-void DisplayFullInfo(HWND hInfoText, const DeviceInfo* deviceInfo, const WCHAR* entityQuery, const WCHAR* driverQuery) 
+void DisplayFullInfo(const DeviceInfo* deviceInfo, const WCHAR* entityQuery, const WCHAR* driverQuery, BOOL isUSB) 
 {
     if (!deviceInfo || !hInfoText) return;
 
@@ -119,7 +119,7 @@ void DisplayFullInfo(HWND hInfoText, const DeviceInfo* deviceInfo, const WCHAR* 
         delete[] driverDetails;
     }
     SetWindowTextW(hInfoText, infoBuffer);
-    ShowWindow((HWND)hSButton, SW_SHOW);
+    isUSB? ShowWindow((HWND)hSButton, SW_SHOW): ShowWindow((HWND)hSButton, SW_HIDE);
 }
 
 
@@ -139,7 +139,7 @@ void DisplayDeviceInfo(HWND hInfoText, int deviceIndex, int isBluetooth)
         swprintf_s(entityQuery, MAX_BUFFER_SIZE, L"SELECT * FROM Win32_PnPEntity WHERE DeviceID = '%s'", escapedID);
         swprintf_s(driverQuery, MAX_BUFFER_SIZE, L"SELECT * FROM Win32_PnPSignedDriver WHERE DeviceID = '%s'", escapedID);
 
-        DisplayFullInfo(hInfoText, deviceInfo, entityQuery, driverQuery);
+        DisplayFullInfo(deviceInfo, entityQuery, driverQuery, FALSE);
     }
     else 
     {
@@ -155,7 +155,7 @@ void DisplayDeviceInfo(HWND hInfoText, int deviceIndex, int isBluetooth)
         swprintf_s(entityQuery, MAX_BUFFER_SIZE, L"SELECT * FROM Win32_PnPEntity WHERE DeviceID = '%s'", escapedID);
         swprintf_s(driverQuery, MAX_BUFFER_SIZE, L"SELECT * FROM Win32_PnPSignedDriver WHERE DeviceID = '%s'", escapedID);
 
-        DisplayFullInfo(hInfoText, deviceInfo, entityQuery, driverQuery);
+        DisplayFullInfo(deviceInfo, entityQuery, driverQuery, TRUE);
     }
 }
 
@@ -196,6 +196,10 @@ void GetUSBDevices()
             wcscpy_s(escapedID, MAX_BUFFER_SIZE, usbDeviceProfile[i].DeviceID);
             EscapeBackslashes(escapedID);
             usbDeviceProfile[i].IsConnected = IsUsbDeviceConnected(pSvc, escapedID);
+
+            GetDiskPathFromDeviceID(pSvc, escapedID);
+               
+
         }
         delete[] tempDevices; 
     }
@@ -246,23 +250,11 @@ void ChangeState(BOOL isUSBDevice)
         if (selectedIndex < 0 || selectedIndex >= usbDeviceProfileCount) return;
 
         DeviceInfo* deviceInfo = &usbDeviceProfile[selectedIndex];
-        if (ChangeDeviceState(deviceInfo->DeviceID, deviceInfo->IsConnected))
+        if (ChangeUSBDeviceState(deviceInfo->DeviceID, deviceInfo->IsConnected))
         {
             deviceInfo->IsConnected = !deviceInfo->IsConnected;
         }
         DisplayDeviceInfo(hInfoText, selectedIndex, FALSE);
-    }
-    else
-    {
-        if (selectedIndex < 0 || selectedIndex >= bluetoothDeviceProfileCount) return;
-
-        DeviceInfo* deviceInfo = &bluetoothDeviceProfile[selectedIndex];
-
-        if (ChangeDeviceState(deviceInfo->DeviceID, deviceInfo->IsConnected))
-        {
-            deviceInfo->IsConnected = !deviceInfo->IsConnected;
-        }
-        DisplayDeviceInfo(hInfoText, selectedIndex, TRUE);
     }
 }
 
@@ -369,7 +361,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     break;
     case WM_DEVICECHANGE:
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+ //       std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+        SetWindowTextW(hInfoText, L"");
         ClearTree(hTreeView);
         PopulateTreeViewWithDevices(hTreeView);
     }

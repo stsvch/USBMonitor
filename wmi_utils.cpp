@@ -1,459 +1,460 @@
 #include "wmi_utils.h"
 
-HRESULT InitWMI(IWbemLocator** pLoc, IWbemServices** pSvc) 
+HRESULT InitWMI(IWbemLocator** pLoc, IWbemServices** pSvc)
 {
     HRESULT hres = NULL;
 
+    // Инициализация COM-библиотеки для многозадачности
     hres = CoInitializeEx(0, COINIT_MULTITHREADED);
-    if (FAILED(hres)) 
+    if (FAILED(hres))
     {
-        return hres; 
+        return hres; // Возвращаем ошибку, если инициализация COM не удалась
     }
 
+    // Установка уровня безопасности COM
     hres = CoInitializeSecurity(
         NULL, -1, NULL, NULL,
         RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE,
         NULL, EOAC_NONE, NULL);
-    if (FAILED(hres)) 
+    if (FAILED(hres))
     {
-        CoUninitialize(); 
-        return hres;
-    }
-
-    hres = CoCreateInstance(CLSID_WbemLocator, NULL, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID*)pLoc);
-    if (FAILED(hres)) 
-    {
+        // Если настройка безопасности не удалась, разъединяем COM и возвращаем ошибку
         CoUninitialize();
         return hres;
     }
 
-    hres = (*pLoc)->ConnectServer(
-        _bstr_t(L"ROOT\\CIMV2"), NULL, NULL, 0, NULL, 0, 0, pSvc);
-    if (FAILED(hres)) 
+    // Создание WbemLocator для взаимодействия с WMI
+    hres = CoCreateInstance(CLSID_WbemLocator, NULL, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID*)pLoc);
+    if (FAILED(hres))
     {
-        (*pLoc)->Release(); 
-        CoUninitialize(); 
+        // Если создание WbemLocator не удалось, разъединяем COM и возвращаем ошибку
+        CoUninitialize();
         return hres;
     }
-    return S_OK; 
+
+    // Подключение к WMI-серверу на ROOT\\CIMV2
+    hres = (*pLoc)->ConnectServer(
+        _bstr_t(L"ROOT\\CIMV2"), NULL, NULL, 0, NULL, 0, 0, pSvc);
+    if (FAILED(hres))
+    {
+        // Если подключение не удалось, освобождаем ресурсы и разъединяем COM
+        (*pLoc)->Release();
+        CoUninitialize();
+        return hres;
+    }
+
+    return S_OK;
 }
 
-Map* FullQueryDevices(IWbemServices* pSvc, const wchar_t* query, int* count) 
+Map* FullQueryDevices(IWbemServices* pSvc, const wchar_t* query, int* count)
 {
     HRESULT hres;
 
     IEnumWbemClassObject* pEnumerator = NULL;
-    hres = pSvc->ExecQuery(
-        bstr_t(L"WQL"),
-        bstr_t(query),
-        WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
-        NULL, &pEnumerator);
 
-    if (FAILED(hres)) 
+    // Выполнение WMI-запроса 
+    hres = pSvc->ExecQuery(
+        bstr_t(L"WQL"),  
+        bstr_t(query),  
+        WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, // Флаги для выполнения запроса
+        NULL, &pEnumerator); // Указатель на перечислитель результатов
+
+    if (FAILED(hres))
     {
         *count = 0;
         return nullptr; 
     }
 
     size_t capacity = 10; 
-    *count = 0;
-    Map* results = new Map[capacity];
+    *count = 0; 
+    Map* results = new Map[capacity]; 
 
     IWbemClassObject* pclsObj = NULL;
     ULONG uReturn = 0;
 
-    while (true) 
+    //получение объектов из перечислителя
+    while (true)
     {
+        // Получаем следующий объект из перечислителя
         hres = pEnumerator->Next(WBEM_INFINITE, 1, &pclsObj, &uReturn);
-        if (FAILED(hres) || uReturn == 0) 
+        if (FAILED(hres) || uReturn == 0)
         {
-            break; 
+            break; // Выход из цикла, если не удалось получить объект или объекты закончились
         }
+
         SAFEARRAY* pNames = NULL;
+        // Получаем имена всех свойств объекта
         hres = pclsObj->GetNames(NULL, WBEM_FLAG_ALWAYS, NULL, &pNames);
         if (FAILED(hres) || !pNames) {
-            pclsObj->Release();
-            continue;
+            pclsObj->Release(); // Освобождаем объект, если не удалось получить имена
+            continue; // Переходим к следующему объекту
         }
 
         LONG lBound, uBound;
+        // Получаем границы массива имен свойств
         SafeArrayGetLBound(pNames, 1, &lBound);
         SafeArrayGetUBound(pNames, 1, &uBound);
 
-        for (LONG i = lBound; i <= uBound; ++i) 
+        // Обрабатываем каждое свойство объекта
+        for (LONG i = lBound; i <= uBound; ++i)
         {
             BSTR propertyName;
+            // Получаем имя свойства
             SafeArrayGetElement(pNames, &i, &propertyName);
 
             VARIANT vtProp;
-            VariantInit(&vtProp);
+            VariantInit(&vtProp); // Инициализируем переменную для хранения значения свойства
 
+            // Получаем значение свойства
             hres = pclsObj->Get(propertyName, 0, &vtProp, 0, 0);
-            if (SUCCEEDED(hres)) 
+            if (SUCCEEDED(hres))
             {
-                if (*count == capacity) 
+                // Если достигнут предел размера массива, увеличиваем его
+                if (*count == capacity)
                 {
-                    capacity *= 2; 
+                    capacity *= 2; // Увеличиваем емкость массива в два раза
                     Map* newResults = new Map[capacity];
+                    // Копируем старые результаты в новый массив
                     for (size_t j = 0; j < *count; ++j) {
                         newResults[j] = results[j];
                     }
-                    delete[] results;
-                    results = newResults;
+                    delete[] results; // Освобождаем старый массив
+                    results = newResults; // Обновляем указатель на новый массив
                 }
 
+                // Сохраняем имя свойства в результатах
                 wcsncpy_s(results[*count].Key, propertyName, MAX_BUFFER_SIZE - 1);
 
+                // Обрабатываем значения различных типов
                 switch (vtProp.vt)
                 {
-                case VT_BSTR:
+                case VT_BSTR: // Строки
                     wcsncpy_s(results[*count].Value, vtProp.bstrVal ? vtProp.bstrVal : L"(null)", MAX_BUFFER_SIZE - 1);
                     break;
-                case VT_I4:
+                case VT_I4: // Целые числа (int)
                     swprintf_s(results[*count].Value, MAX_BUFFER_SIZE, L"%d", vtProp.lVal);
                     break;
-                case VT_UI4:
+                case VT_UI4: // Беззнаковые целые числа (unsigned int)
                     swprintf_s(results[*count].Value, MAX_BUFFER_SIZE, L"%u", vtProp.ulVal);
                     break;
-                case VT_BOOL:
+                case VT_BOOL: // Логические значения (True/False)
                     wcsncpy_s(results[*count].Value, vtProp.boolVal ? L"True" : L"False", MAX_BUFFER_SIZE - 1);
                     break;
-                case VT_DATE:
+                case VT_DATE: // Дата
                     SYSTEMTIME st;
-                    if (VariantTimeToSystemTime(vtProp.date, &st)) 
+                    // Преобразуем дату в формат времени
+                    if (VariantTimeToSystemTime(vtProp.date, &st))
                     {
                         swprintf_s(results[*count].Value, MAX_BUFFER_SIZE, L"%02d/%02d/%04d %02d:%02d:%02d",
                             st.wMonth, st.wDay, st.wYear, st.wHour, st.wMinute, st.wSecond);
                     }
-                    else 
+                    else
                     {
                         wcsncpy_s(results[*count].Value, L"(invalid date)", MAX_BUFFER_SIZE - 1);
                     }
                     break;
-                case VT_NULL:
+                case VT_NULL: // NULL-значения
                     wcsncpy_s(results[*count].Value, L"(null)", MAX_BUFFER_SIZE - 1);
                     break;
-                default:
+                default: // Неизвестные типы данных
                     wcsncpy_s(results[*count].Value, L"(unknown type)", MAX_BUFFER_SIZE - 1);
                     break;
                 }
-                ++(*count); 
+
+                // Увеличиваем счетчик результатов
+                ++(*count);
             }
 
+            // Очистка данных
             VariantClear(&vtProp);
-            SysFreeString(propertyName); 
+            SysFreeString(propertyName);
         }
 
+        // Освобождаем массив имен свойств
         SafeArrayDestroy(pNames);
-        pclsObj->Release();
+        pclsObj->Release(); // Освобождаем объект WMI
     }
 
+    // Освобождаем перечислитель
     pEnumerator->Release();
-    return results; 
+    return results; // Возвращаем массив результатов
 }
 
-DeviceInfo* QueryDevices(IWbemServices* pSvc, const wchar_t* query, int* count) 
+
+DeviceInfo* QueryDevices(IWbemServices* pSvc, const wchar_t* query, int* count)
 {
     HRESULT hres;
 
     IEnumWbemClassObject* pEnumerator = NULL;
+
+    // Выполнение WMI-запроса с использованием WQL (WMI Query Language)
     hres = pSvc->ExecQuery(
-        bstr_t(L"WQL"),
-        bstr_t(query),
-        WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
-        NULL, &pEnumerator);
+        bstr_t(L"WQL"),      // Используем WQL для запроса
+        bstr_t(query),       // Запрос, переданный в функцию
+        WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, // Флаги для выполнения запроса
+        NULL, &pEnumerator); // Указатель на перечислитель результатов
 
     if (FAILED(hres))
     {
         *count = 0;
-        return NULL; 
+        return NULL; // Возвращаем NULL, если запрос не удался
     }
 
     IWbemClassObject* pclsObj = NULL;
     ULONG uReturn = 0;
 
-    size_t capacity = 20; 
-    *count = 0;
-    DeviceInfo* devices = new DeviceInfo[capacity]; 
+    size_t capacity = 20; // Начальный размер массива для хранения результатов
+    *count = 0;  // Инициализация счетчика результатов
+    DeviceInfo* devices = new DeviceInfo[capacity]; // Выделение памяти для массива результатов
 
-    while (true) 
+    // Основной цикл обработки объектов, возвращаемых запросом
+    while (true)
     {
+        // Получаем следующий объект из перечислителя
         hres = pEnumerator->Next(WBEM_INFINITE, 1, &pclsObj, &uReturn);
-        if (FAILED(hres)) break;
-        if (uReturn == 0) break;
+        if (FAILED(hres)) break;  // Прерываем, если произошла ошибка
+        if (uReturn == 0) break;  // Прерываем, если нет объектов для обработки
 
-        if (*count == capacity) 
+        // Если емкость массива исчерпана, увеличиваем ее
+        if (*count == capacity)
         {
-            capacity *= 2; 
-            DeviceInfo* newDevices = new DeviceInfo[capacity];
-            for (size_t i = 0; i < *count; ++i) 
+            capacity *= 2; // Удваиваем размер массива
+            DeviceInfo* newDevices = new DeviceInfo[capacity];  // Выделяем новый массив
+            // Копируем старые устройства в новый массив
+            for (size_t i = 0; i < *count; ++i)
             {
                 newDevices[i] = devices[i];
             }
-            delete[] devices;
-            devices = newDevices;
+            delete[] devices;  // Освобождаем старый массив
+            devices = newDevices; // Обновляем указатель на новый массив
         }
 
         VARIANT vtProp;
-        VariantInit(&vtProp);
+        VariantInit(&vtProp); // Инициализация переменной для хранения значения свойства
 
-        DeviceInfo& device = devices[*count];
+        DeviceInfo& device = devices[*count];  // Ссылка на текущий объект устройства
 
+        // Получаем значение свойства "DeviceID"
         hres = pclsObj->Get(L"DeviceID", 0, &vtProp, 0, 0);
         if (SUCCEEDED(hres) && vtProp.vt == VT_BSTR)
         {
-            wcsncpy_s(device.DeviceID, vtProp.bstrVal, MAX_BUFFER_SIZE); 
-            device.DeviceID[MAX_BUFFER_SIZE - 1] = L'\0';
+            wcsncpy_s(device.DeviceID, vtProp.bstrVal, MAX_BUFFER_SIZE); // Копируем значение в структуру
+            device.DeviceID[MAX_BUFFER_SIZE - 1] = L'\0'; // Обеспечиваем корректное завершение строки
         }
         else
         {
-            device.DeviceID[0] = L'\0'; 
+            device.DeviceID[0] = L'\0'; // Если свойство не найдено, оставляем пустую строку
         }
-        VariantClear(&vtProp);
+        VariantClear(&vtProp); // Очищаем память, занятую переменной
 
+        // Получаем значение свойства "Description"
         hres = pclsObj->Get(L"Description", 0, &vtProp, 0, 0);
-        if (SUCCEEDED(hres) && vtProp.vt == VT_BSTR) 
+        if (SUCCEEDED(hres) && vtProp.vt == VT_BSTR)
         {
-            wcsncpy_s(device.Description, vtProp.bstrVal, MAX_BUFFER_SIZE);
-            device.Description[MAX_BUFFER_SIZE - 1] = L'\0';
+            wcsncpy_s(device.Description, vtProp.bstrVal, MAX_BUFFER_SIZE); // Копируем описание
+            device.Description[MAX_BUFFER_SIZE - 1] = L'\0'; // Обеспечиваем корректное завершение строки
         }
-        else 
+        else
         {
-            device.Description[0] = L'\0';
+            device.Description[0] = L'\0'; // Если свойство не найдено, оставляем пустую строку
         }
-        VariantClear(&vtProp);
+        VariantClear(&vtProp); // Очищаем память, занятую переменной
 
+        // Получаем значение свойства "Status"
         hres = pclsObj->Get(L"Status", 0, &vtProp, 0, 0);
         if (SUCCEEDED(hres) && vtProp.vt == VT_BSTR)
         {
-            wcsncpy_s(device.Status, vtProp.bstrVal, MAX_BUFFER_SIZE);
-            device.Status[MAX_BUFFER_SIZE - 1] = L'\0';
+            wcsncpy_s(device.Status, vtProp.bstrVal, MAX_BUFFER_SIZE); // Копируем статус
+            device.Status[MAX_BUFFER_SIZE - 1] = L'\0'; // Обеспечиваем корректное завершение строки
         }
-        else 
+        else
         {
-            device.Status[0] = L'\0';
+            device.Status[0] = L'\0'; // Если свойство не найдено, оставляем пустую строку
         }
-        VariantClear(&vtProp);
+        VariantClear(&vtProp); // Очищаем память, занятую переменной
 
+        // Получаем значение свойства "Caption"
         hres = pclsObj->Get(L"Caption", 0, &vtProp, 0, 0);
-        if (SUCCEEDED(hres) && vtProp.vt == VT_BSTR) {
-            wcsncpy_s(device.Caption, vtProp.bstrVal, MAX_BUFFER_SIZE); 
-            device.Caption[MAX_BUFFER_SIZE - 1] = L'\0'; 
+        if (SUCCEEDED(hres) && vtProp.vt == VT_BSTR)
+        {
+            wcsncpy_s(device.Caption, vtProp.bstrVal, MAX_BUFFER_SIZE); // Копируем подпись устройства
+            device.Caption[MAX_BUFFER_SIZE - 1] = L'\0'; // Обеспечиваем корректное завершение строки
         }
-        else {
-            device.Caption[0] = L'\0'; 
+        else
+        {
+            device.Caption[0] = L'\0'; // Если свойство не найдено, оставляем пустую строку
         }
-        VariantClear(&vtProp);
+        VariantClear(&vtProp); // Очищаем память, занятую переменной
 
-        ++(*count); 
+        ++(*count); // Увеличиваем счетчик результатов
 
-        pclsObj->Release();
+        pclsObj->Release(); // Освобождаем объект
     }
 
-    pEnumerator->Release();
-    return devices; 
+    pEnumerator->Release(); // Освобождаем перечислитель
+    return devices; // Возвращаем массив устройств
 }
+
 
 BOOL IsUsbDeviceConnected(IWbemServices* pSvc, const WCHAR* deviceID)
 {
     HRESULT hres;
 
-    WCHAR query[512];  
+    WCHAR query[512];
+    // Формируем WQL-запрос для получения информации о конкретном устройстве по его DeviceID
     swprintf_s(query, 512, L"SELECT * FROM Win32_PnPEntity WHERE DeviceID = '%s'", deviceID);
 
     IEnumWbemClassObject* pEnumerator = NULL;
-    hres = pSvc->ExecQuery(bstr_t(L"WQL"), bstr_t(query),
-        WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
-        NULL, &pEnumerator);
 
-    if (FAILED(hres)) return FALSE; 
+    // Выполняем запрос, чтобы получить данные о конкретном устройстве по DeviceID
+    hres = pSvc->ExecQuery(bstr_t(L"WQL"), bstr_t(query),
+        WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, // Используем флаги для немедленного получения результатов
+        NULL, &pEnumerator); // Получаем указатель на перечислитель объектов
+
+    if (FAILED(hres)) return FALSE; // Если запрос не удался, возвращаем FALSE (устройство не подключено)
 
     IWbemClassObject* pClassObject = NULL;
     ULONG returnCount = 0;
-    BOOL isConnected = FALSE;
+    BOOL isConnected = FALSE;  // Переменная для хранения статуса подключения устройства
 
+    // Обрабатываем полученные объекты, возвращаемые запросом
     while (true)
     {
+        // Получаем следующий объект из перечислителя
         hres = pEnumerator->Next(WBEM_INFINITE, 1, &pClassObject, &returnCount);
-        if (returnCount == 0) break;  
+        if (returnCount == 0) break;  // Если объектов больше нет, выходим из цикла
 
         VARIANT vtProp;
 
+        // Получаем статус устройства (например, "OK", если оно работает корректно)
         hres = pClassObject->Get(L"Status", 0, &vtProp, 0, 0);
-        if (FAILED(hres)) 
+        if (FAILED(hres))
         {
-            pClassObject->Release();
-            continue;  
+            pClassObject->Release(); // Освобождаем объект, если не удалось получить свойство
+            continue;  // Переходим к следующему объекту
         }
 
+        // Проверяем, что статус устройства "OK", что означает нормальное подключение
         if (wcscmp(vtProp.bstrVal, L"OK") == 0)
         {
-            isConnected = TRUE;
+            isConnected = TRUE;  // Устройство подключено и работает корректно
         }
 
-        VariantClear(&vtProp);
+        VariantClear(&vtProp); // Очищаем переменную, занятую значением статуса
 
+        // Получаем код ошибки конфигурации устройства
         hres = pClassObject->Get(L"ConfigManagerErrorCode", 0, &vtProp, 0, 0);
-        if (SUCCEEDED(hres)) 
+        if (SUCCEEDED(hres))
         {
-            if (vtProp.intVal != 0) 
-            {  
-                isConnected = FALSE;
+            // Если код ошибки не равен 0, это означает, что устройство имеет ошибку конфигурации
+            if (vtProp.intVal != 0)
+            {
+                isConnected = FALSE; // Устройство не подключено корректно
             }
         }
-        VariantClear(&vtProp);
+        VariantClear(&vtProp); // Очищаем переменную, занятую кодом ошибки
 
-        pClassObject->Release();
-        break;  
+        pClassObject->Release(); // Освобождаем объект
+        break;  // Останавливаем цикл, так как нашли нужное устройство
     }
-    pEnumerator->Release();
-    return isConnected; 
+
+    pEnumerator->Release(); // Освобождаем перечислитель
+    return isConnected;  // Возвращаем результат проверки подключения устройства
 }
 
-BOOL IsBluetoothDeviceConnected(const WCHAR* deviceName) 
+BOOL IsBluetoothDeviceConnected(const WCHAR* deviceName)
 {
+    // Структура для параметров поиска Bluetooth устройств
     BLUETOOTH_DEVICE_SEARCH_PARAMS searchParams;
+    // Структура для информации о Bluetooth устройстве
     BLUETOOTH_DEVICE_INFO deviceInfo;
-    HANDLE hFind = NULL;
+    HANDLE hFind = NULL; // Указатель на найденное устройство
 
+    // Инициализируем параметры поиска Bluetooth устройств
     ZeroMemory(&searchParams, sizeof(BLUETOOTH_DEVICE_SEARCH_PARAMS));
-    searchParams.dwSize = sizeof(BLUETOOTH_DEVICE_SEARCH_PARAMS);
-    searchParams.fReturnAuthenticated = TRUE;  
-    searchParams.fReturnConnected = TRUE;    
-    searchParams.fReturnRemembered = TRUE;  
+    searchParams.dwSize = sizeof(BLUETOOTH_DEVICE_SEARCH_PARAMS);  // Устанавливаем размер структуры
+    searchParams.fReturnAuthenticated = TRUE;  // Возвращать только аутентифицированные устройства
+    searchParams.fReturnConnected = TRUE;     // Возвращать только подключенные устройства
+    searchParams.fReturnRemembered = TRUE;    // Возвращать запомненные устройства
 
+    // Инициализируем структуру с информацией о устройстве
     ZeroMemory(&deviceInfo, sizeof(BLUETOOTH_DEVICE_INFO));
-    deviceInfo.dwSize = sizeof(BLUETOOTH_DEVICE_INFO);
+    deviceInfo.dwSize = sizeof(BLUETOOTH_DEVICE_INFO);  // Устанавливаем размер структуры
 
+    // Ищем первое устройство Bluetooth, соответствующее заданным параметрам
     hFind = BluetoothFindFirstDevice(&searchParams, &deviceInfo);
-    if (hFind == NULL) return FALSE;
-    do 
+    if (hFind == NULL) return FALSE;  // Если устройство не найдено, возвращаем FALSE
+
+    // Проходим по всем найденным Bluetooth устройствам
+    do
     {
-        if (_wcsicmp(deviceInfo.szName, deviceName) == 0) 
+        // Сравниваем имя устройства с заданным в параметре
+        if (_wcsicmp(deviceInfo.szName, deviceName) == 0)
         {
-            if (deviceInfo.fConnected) 
+            // Если устройство найдено и подключено, возвращаем TRUE
+            if (deviceInfo.fConnected)
             {
-                BluetoothFindDeviceClose(hFind);
-                return TRUE;
+                BluetoothFindDeviceClose(hFind); // Закрываем поиск
+                return TRUE;  // Устройство подключено
             }
-            else 
+            else
             {
-                BluetoothFindDeviceClose(hFind);
-                return FALSE;
+                BluetoothFindDeviceClose(hFind); // Закрываем поиск
+                return FALSE;  // Устройство найдено, но не подключено
             }
         }
-    } while (BluetoothFindNextDevice(hFind, &deviceInfo));
+    } while (BluetoothFindNextDevice(hFind, &deviceInfo));  // Переходим к следующему найденному устройству
 
-    BluetoothFindDeviceClose(hFind);
-    return FALSE;
+    BluetoothFindDeviceClose(hFind); // Закрываем поиск, если устройства с таким именем не найдено
+    return FALSE;  // Возвращаем FALSE, если не нашли указанное устройство
 }
 
-BOOL ChangeDeviceState(const WCHAR* deviceID, BOOL connected)
-{
-    HDEVINFO hDevInfo = SetupDiGetClassDevs(NULL, NULL, NULL, DIGCF_ALLCLASSES | DIGCF_PRESENT);
-    if (hDevInfo == INVALID_HANDLE_VALUE) return FALSE;
+void GetDiskPathFromDeviceID(IWbemServices* pSsvc, const WCHAR* deviceID) {
 
-    SP_DEVINFO_DATA devInfoData;
-    devInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
+    // Получаем список всех USB устройств
+    GUID guid = GUID_DEVINTERFACE_DISK;  // Сюда можно подставить другой GUID, если нужно работать с другими типами устройств
+    HDEVINFO deviceInfoSet = SetupDiGetClassDevs(&guid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
 
-    DWORD index = 0;
-    while (SetupDiEnumDeviceInfo(hDevInfo, index++, &devInfoData))
-    {
-        WCHAR currentDeviceID[MAX_DEVICE_ID_LEN];
-        if (SetupDiGetDeviceInstanceIdW(hDevInfo, &devInfoData, currentDeviceID, MAX_DEVICE_ID_LEN, NULL))
-        {
-            if (_wcsicmp(currentDeviceID, deviceID) == 0)
-            {
-                SP_PROPCHANGE_PARAMS propChangeParams;
-                propChangeParams.ClassInstallHeader.cbSize = sizeof(SP_CLASSINSTALL_HEADER);
-                propChangeParams.ClassInstallHeader.InstallFunction = DIF_PROPERTYCHANGE;
-                propChangeParams.StateChange = connected ? DICS_DISABLE: DICS_ENABLE;
-                propChangeParams.Scope = DICS_FLAG_GLOBAL;
-                propChangeParams.HwProfile = 0;
-
-                if (!SetupDiSetClassInstallParams(hDevInfo, &devInfoData,
-                    (SP_CLASSINSTALL_HEADER*)&propChangeParams,
-                    sizeof(SP_PROPCHANGE_PARAMS)))
-                {
-                    SetupDiDestroyDeviceInfoList(hDevInfo);
-                    return FALSE;
-                }
-
-                if (!SetupDiChangeState(hDevInfo, &devInfoData))
-                {
-                    SetupDiDestroyDeviceInfoList(hDevInfo);
-                    return FALSE;
-                }
-                SetupDiDestroyDeviceInfoList(hDevInfo);
-                return TRUE;
-            }
-        }
+    if (deviceInfoSet == INVALID_HANDLE_VALUE) {
+      //  std::wcerr << L"Ошибка получения списка устройств.\n";
+        return;
     }
-    SetupDiDestroyDeviceInfoList(hDevInfo);
-    return FALSE;
-}
-
-DeviceInfo* ListConnectedUSBDevices(int* deviceCount) 
-{
-    *deviceCount = 0; 
-
-    HDEVINFO deviceInfoSet = SetupDiGetClassDevs(
-        NULL,
-        L"USB",
-        NULL,
-        DIGCF_PRESENT | DIGCF_ALLCLASSES
-    );
-
-    if (deviceInfoSet == INVALID_HANDLE_VALUE) return NULL;
 
     SP_DEVINFO_DATA deviceInfoData;
     deviceInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
 
-    int capacity = 10;
-    DeviceInfo* devices = new DeviceInfo[capacity];
+    // Перебираем устройства
+    for (DWORD i = 0; SetupDiEnumDeviceInfo(deviceInfoSet, i, &deviceInfoData); ++i) {
+        WCHAR szDeviceID[MAX_PATH];
 
-    for (int i = 0; SetupDiEnumDeviceInfo(deviceInfoSet, i, &deviceInfoData); ++i) 
-    {
-        if (*deviceCount >= capacity) {
-            capacity *= 2; 
-            DeviceInfo* newDevices = new DeviceInfo[capacity];
-            memcpy(newDevices, devices, sizeof(DeviceInfo) * (*deviceCount)); 
-            delete[] devices; 
-            devices = newDevices; 
-        }
+        // Получаем идентификатор устройства
+        if (SetupDiGetDeviceInstanceId(deviceInfoSet, &deviceInfoData, szDeviceID, sizeof(szDeviceID) / sizeof(szDeviceID[0]), NULL)) {
+            // Сравниваем идентификатор устройства с переданным
+            if (_wcsicmp(szDeviceID, deviceID) == 0) {
+               // std::wcout << L"Устройство найдено: " << szDeviceID << std::endl;
 
-        DeviceInfo& device = devices[*deviceCount];
+                // Теперь получим информацию о пути устройства, например, путь через который подключено
+                SP_DEVICE_INTERFACE_DATA deviceInterfaceData;
+                deviceInterfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
 
-        if (SetupDiGetDeviceRegistryProperty(
-            deviceInfoSet,
-            &deviceInfoData,
-            SPDRP_DEVICEDESC,
-            NULL,
-            (PBYTE)device.Caption,
-            sizeof(device.Caption),
-            NULL))
-        {
-        }
-        else 
-        {
-            wcscpy_s(device.Caption, L"Unknown Device");
-        }
+                if (SetupDiEnumDeviceInterfaces(deviceInfoSet, &deviceInfoData, &guid, 0, &deviceInterfaceData)) {
+                    DWORD requiredSize = 0;
+                    SetupDiGetDeviceInterfaceDetail(deviceInfoSet, &deviceInterfaceData, NULL, 0, &requiredSize, NULL);
+                    PSP_DEVICE_INTERFACE_DETAIL_DATA pDetail = (PSP_DEVICE_INTERFACE_DETAIL_DATA)malloc(requiredSize);
 
-        if (SetupDiGetDeviceInstanceId(
-            deviceInfoSet,
-            &deviceInfoData,
-            device.DeviceID,
-            sizeof(device.DeviceID),
-            NULL))
-        {
+                    pDetail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
+
+                    if (SetupDiGetDeviceInterfaceDetail(deviceInfoSet, &deviceInterfaceData, pDetail, requiredSize, &requiredSize, NULL)) {
+                     //   std::wcout << L"Путь устройства: " << pDetail->DevicePath << std::endl;
+                    }
+
+                    free(pDetail);
+                }
+                break;
+            }
         }
-        else 
-        {
-            wcscpy_s(device.DeviceID, L"Unknown Device ID");
-        }
-        ++(*deviceCount); 
     }
-    SetupDiDestroyDeviceInfoList(deviceInfoSet);
-    return devices; 
-}
 
+    // Освобождаем ресурсы
+    SetupDiDestroyDeviceInfoList(deviceInfoSet);
+ }
