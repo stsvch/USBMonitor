@@ -128,6 +128,9 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="driver_utils.cpp" />
+    <ClCompile Include="history_util.cpp" />
+    <ClCompile Include="history_util.h" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="resource.h" />
     <ClCompile Include="usb_utils.cpp" />
@@ -142,6 +145,7 @@
     </Image>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="driver_utils.h" />
     <ClInclude Include="global.h" />
     <ClInclude Include="usb_utils.h" />
     <ClInclude Include="wmi_utils.h" />

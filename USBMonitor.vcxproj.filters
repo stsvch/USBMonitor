@@ -27,6 +27,15 @@
     <ClCompile Include="usb_utils.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="history_util.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="history_util.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="driver_utils.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="resource.rc">
@@ -46,6 +55,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="global.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="driver_utils.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

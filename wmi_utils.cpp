@@ -362,53 +362,6 @@ BOOL IsUsbDeviceConnected(IWbemServices* pSvc, const WCHAR* deviceID)
     return isConnected;  // Возвращаем результат проверки подключения устройства
 }
 
-BOOL IsBluetoothDeviceConnected(const WCHAR* deviceName)
-{
-    // Структура для параметров поиска Bluetooth устройств
-    BLUETOOTH_DEVICE_SEARCH_PARAMS searchParams;
-    // Структура для информации о Bluetooth устройстве
-    BLUETOOTH_DEVICE_INFO deviceInfo;
-    HANDLE hFind = NULL; // Указатель на найденное устройство
-
-    // Инициализируем параметры поиска Bluetooth устройств
-    ZeroMemory(&searchParams, sizeof(BLUETOOTH_DEVICE_SEARCH_PARAMS));
-    searchParams.dwSize = sizeof(BLUETOOTH_DEVICE_SEARCH_PARAMS);  // Устанавливаем размер структуры
-    searchParams.fReturnAuthenticated = TRUE;  // Возвращать только аутентифицированные устройства
-    searchParams.fReturnConnected = TRUE;     // Возвращать только подключенные устройства
-    searchParams.fReturnRemembered = TRUE;    // Возвращать запомненные устройства
-
-    // Инициализируем структуру с информацией о устройстве
-    ZeroMemory(&deviceInfo, sizeof(BLUETOOTH_DEVICE_INFO));
-    deviceInfo.dwSize = sizeof(BLUETOOTH_DEVICE_INFO);  // Устанавливаем размер структуры
-
-    // Ищем первое устройство Bluetooth, соответствующее заданным параметрам
-    hFind = BluetoothFindFirstDevice(&searchParams, &deviceInfo);
-    if (hFind == NULL) return FALSE;  // Если устройство не найдено, возвращаем FALSE
-
-    // Проходим по всем найденным Bluetooth устройствам
-    do
-    {
-        // Сравниваем имя устройства с заданным в параметре
-        if (_wcsicmp(deviceInfo.szName, deviceName) == 0)
-        {
-            // Если устройство найдено и подключено, возвращаем TRUE
-            if (deviceInfo.fConnected)
-            {
-                BluetoothFindDeviceClose(hFind); // Закрываем поиск
-                return TRUE;  // Устройство подключено
-            }
-            else
-            {
-                BluetoothFindDeviceClose(hFind); // Закрываем поиск
-                return FALSE;  // Устройство найдено, но не подключено
-            }
-        }
-    } while (BluetoothFindNextDevice(hFind, &deviceInfo));  // Переходим к следующему найденному устройству
-
-    BluetoothFindDeviceClose(hFind); // Закрываем поиск, если устройства с таким именем не найдено
-    return FALSE;  // Возвращаем FALSE, если не нашли указанное устройство
-}
-
 void GetDiskPathFromDeviceID(IWbemServices* pSsvc, const WCHAR* deviceID) {
 
     // Получаем список всех USB устройств
@@ -454,7 +407,6 @@ void GetDiskPathFromDeviceID(IWbemServices* pSsvc, const WCHAR* deviceID) {
             }
         }
     }
-
     // Освобождаем ресурсы
     SetupDiDestroyDeviceInfoList(deviceInfoSet);
  }

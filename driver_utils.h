@@ -12,5 +12,9 @@
 #pragma comment(lib, "SetupAPI.lib")
 #pragma comment(lib, "newdev.lib")
 
-BOOL ChangeUSBDeviceState(const WCHAR* deviceID, BOOL connected);
-DeviceInfo* ListConnectedUSBDevices(int* deviceCount);
+void RollbackDriver(const WCHAR* deviceIdentifier);
+void RemoveDriver(const WCHAR* deviceIdentifier);
+void InstallDriver(const WCHAR* infPath, const WCHAR* deviceID, const WCHAR* driverVersion);
+LPWSTR ShowDriverSelectionDialog(HWND hwnd);
+// Функция, вызываемая при нажатии на кнопку для выбора папки и установки драйвера
+void OnBrowseAndInstallDriver(HWND hwnd);

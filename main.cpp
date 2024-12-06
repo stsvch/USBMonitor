@@ -1,5 +1,6 @@
 #include "wmi_utils.h"
 #include "usb_utils.h"
+#include "resource.h"
 #include <windows.h>
 #include <commctrl.h>
 
@@ -7,67 +8,58 @@
 
 #define IDC_TREEVIEW 1
 #define IDC_INFOTEXT 2
-#define IDC_SBUTTON 3
+#define IDC_BUTTON_S   3
+#define IDC_BUTTON_U   4
+#define IDC_BUTTON_D   5
+#define IDC_BUTTON_R   6
+
+// Обработчики страниц
+INT_PTR CALLBACK Page1Proc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
+INT_PTR CALLBACK Page2Proc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 HWND hSButton = NULL;
 HWND hInfoText = NULL;
 HTREEITEM selectedItem = NULL;
 DeviceInfo usbDeviceProfile[256];
-DeviceInfo bluetoothDeviceProfile[256];
 int usbDeviceProfileCount = 0;
-int bluetoothDeviceProfileCount = 0;
 IWbemLocator* pLoc = NULL;
 IWbemServices* pSvc = NULL;
-int selectedIndex=-2;
+int selectedIndex = -2;
 
+HWND hPages[2]; // Массив для страниц вкладок
+HWND hTabControl;
 
 void ClearUSBList()
 {
     usbDeviceProfileCount = 0;
 }
 
-void ClearBluetoothList()
-{
-    bluetoothDeviceProfileCount = 0;
-}
-
 void ClearTree(HWND hwndTree)
 {
     HTREEITEM hItem = TreeView_GetRoot(hwndTree);
-    while (hItem != NULL) 
+    while (hItem != NULL)
     {
-        HTREEITEM hNextItem = TreeView_GetNextItem(hwndTree, hItem, TVGN_NEXT); 
+        HTREEITEM hNextItem = TreeView_GetNextItem(hwndTree, hItem, TVGN_NEXT);
         TreeView_DeleteItem(hwndTree, hItem);
-        hItem = hNextItem; 
+        hItem = hNextItem;
     }
 }
 
-void EscapeBackslashes(WCHAR* str) 
+void DisplayFullInfo(const DeviceInfo* deviceInfo, const WCHAR* entityQuery, const WCHAR* driverQuery)
 {
-    WCHAR* p = str;
-    while (*p)
-    {
-        if (*p == L'\\') 
-        {
-            memmove(p + 1, p, (wcslen(p) + 1) * sizeof(WCHAR));
-            *p = L'\\'; 
-            p++; 
-        }
-        p++;
-    }
-}
+    if (!deviceInfo) return;
 
-void DisplayFullInfo(const DeviceInfo* deviceInfo, const WCHAR* entityQuery, const WCHAR* driverQuery, BOOL isUSB) 
-{
-    if (!deviceInfo || !hInfoText) return;
-
-    WCHAR infoBuffer[MAX_BUFFER_SIZE * 10]; 
-    wcscpy_s(infoBuffer, MAX_BUFFER_SIZE * 10, L"");
+    WCHAR deviceInfoBuffer[MAX_BUFFER_SIZE * 10];
+    WCHAR driverInfoBuffer[MAX_BUFFER_SIZE * 10];
+    wcscpy_s(deviceInfoBuffer, MAX_BUFFER_SIZE * 10, L"");
+    wcscpy_s(driverInfoBuffer, MAX_BUFFER_SIZE * 10, L"");
 
     int resultCount = 0;
     Map* deviceDetails = FullQueryDevices(pSvc, entityQuery, &resultCount);
-    swprintf_s(infoBuffer, MAX_BUFFER_SIZE, L"%s: %s\r\n", L"Connected", deviceInfo->IsConnected ? L"True" : L"False");
-    if(deviceInfo->IsConnected)
+
+    // Собираем информацию об устройстве
+    swprintf_s(deviceInfoBuffer, MAX_BUFFER_SIZE, L"%s: %s\r\n", L"Connected", deviceInfo->IsConnected ? L"True" : L"False");
+    if (deviceInfo->IsConnected)
     {
         SetWindowText((HWND)hSButton, L"Отключить");
     }
@@ -76,18 +68,18 @@ void DisplayFullInfo(const DeviceInfo* deviceInfo, const WCHAR* entityQuery, con
         SetWindowText((HWND)hSButton, L"Подключить");
     }
 
-    if (resultCount > 0 && deviceDetails) 
+    if (resultCount > 0 && deviceDetails)
     {
-        for (int i = 0; i < resultCount; ++i) 
+        for (int i = 0; i < resultCount; ++i)
         {
             WCHAR additionalInfo[MAX_BUFFER_SIZE];
             swprintf_s(additionalInfo, MAX_BUFFER_SIZE, L"%s: %s\r\n", deviceDetails[i].Key, deviceDetails[i].Value);
 
-            if (wcslen(infoBuffer) + wcslen(additionalInfo) < MAX_BUFFER_SIZE * 10) 
+            if (wcslen(deviceInfoBuffer) + wcslen(additionalInfo) < MAX_BUFFER_SIZE * 10)
             {
-                wcscat_s(infoBuffer, MAX_BUFFER_SIZE * 10, additionalInfo);
+                wcscat_s(deviceInfoBuffer, MAX_BUFFER_SIZE * 10, additionalInfo);
             }
-            else 
+            else
             {
                 break;
             }
@@ -95,68 +87,32 @@ void DisplayFullInfo(const DeviceInfo* deviceInfo, const WCHAR* entityQuery, con
         delete[] deviceDetails;
     }
 
+    // Собираем информацию о драйверах
     resultCount = 0;
     Map* driverDetails = FullQueryDevices(pSvc, driverQuery, &resultCount);
 
-    if (resultCount > 0 && driverDetails) 
+    if (resultCount > 0 && driverDetails)
     {
-        wcscat_s(infoBuffer, MAX_BUFFER_SIZE * 10, L"\r\nИнформация о драйверах:\r\n");
-
-        for (int i = 0; i < resultCount; ++i) 
+        for (int i = 0; i < resultCount; ++i)
         {
-            WCHAR driverInfo[MAX_BUFFER_SIZE];
-            swprintf_s(driverInfo, MAX_BUFFER_SIZE, L"%s: %s\r\n", driverDetails[i].Key, driverDetails[i].Value);
+            WCHAR additionalDriverInfo[MAX_BUFFER_SIZE];
+            swprintf_s(additionalDriverInfo, MAX_BUFFER_SIZE, L"%s: %s\r\n", driverDetails[i].Key, driverDetails[i].Value);
 
-            if (wcslen(infoBuffer) + wcslen(driverInfo) < MAX_BUFFER_SIZE * 10) 
+            if (wcslen(driverInfoBuffer) + wcslen(additionalDriverInfo) < MAX_BUFFER_SIZE * 10)
             {
-                wcscat_s(infoBuffer, MAX_BUFFER_SIZE * 10, driverInfo);
+                wcscat_s(driverInfoBuffer, MAX_BUFFER_SIZE * 10, additionalDriverInfo);
             }
-            else 
+            else
             {
                 break;
             }
         }
         delete[] driverDetails;
     }
-    SetWindowTextW(hInfoText, infoBuffer);
-    isUSB? ShowWindow((HWND)hSButton, SW_SHOW): ShowWindow((HWND)hSButton, SW_HIDE);
-}
 
-
-void DisplayDeviceInfo(HWND hInfoText, int deviceIndex, int isBluetooth) 
-{
-    if (isBluetooth) 
-    {
-        if (deviceIndex < 0 || deviceIndex >= bluetoothDeviceProfileCount) return;
-
-        DeviceInfo* deviceInfo = &bluetoothDeviceProfile[deviceIndex];
-        WCHAR escapedID[MAX_BUFFER_SIZE];
-        wcscpy_s(escapedID, MAX_BUFFER_SIZE, deviceInfo->DeviceID);
-        EscapeBackslashes(escapedID);
-
-        WCHAR entityQuery[MAX_BUFFER_SIZE];
-        WCHAR driverQuery[MAX_BUFFER_SIZE];
-        swprintf_s(entityQuery, MAX_BUFFER_SIZE, L"SELECT * FROM Win32_PnPEntity WHERE DeviceID = '%s'", escapedID);
-        swprintf_s(driverQuery, MAX_BUFFER_SIZE, L"SELECT * FROM Win32_PnPSignedDriver WHERE DeviceID = '%s'", escapedID);
-
-        DisplayFullInfo(deviceInfo, entityQuery, driverQuery, FALSE);
-    }
-    else 
-    {
-        if (deviceIndex < 0 || deviceIndex >= usbDeviceProfileCount) return;
-
-        DeviceInfo* deviceInfo = &usbDeviceProfile[deviceIndex];
-        WCHAR escapedID[MAX_BUFFER_SIZE];
-        wcscpy_s(escapedID, MAX_BUFFER_SIZE, deviceInfo->DeviceID);
-        EscapeBackslashes(escapedID);
-
-        WCHAR entityQuery[MAX_BUFFER_SIZE];
-        WCHAR driverQuery[MAX_BUFFER_SIZE];
-        swprintf_s(entityQuery, MAX_BUFFER_SIZE, L"SELECT * FROM Win32_PnPEntity WHERE DeviceID = '%s'", escapedID);
-        swprintf_s(driverQuery, MAX_BUFFER_SIZE, L"SELECT * FROM Win32_PnPSignedDriver WHERE DeviceID = '%s'", escapedID);
-
-        DisplayFullInfo(deviceInfo, entityQuery, driverQuery, TRUE);
-    }
+    // Устанавливаем текст на вкладках
+    SetWindowTextW(GetDlgItem(hPages[0], IDC_INFOTEXT), deviceInfoBuffer);  // Вкладка "Device"
+    SetWindowTextW(GetDlgItem(hPages[1], IDC_INFOTEXT), driverInfoBuffer);  // Вкладка "Driver"
 }
 
 HTREEITEM AddTreeViewItem(HWND hTreeView, HTREEITEM hParent, const WCHAR* text, int deviceIndex, BOOL isUsb)
@@ -171,13 +127,13 @@ HTREEITEM AddTreeViewItem(HWND hTreeView, HTREEITEM hParent, const WCHAR* text, 
 
     if (isUsb)
     {
-        tvinsert.item.iImage = 0;        
-        tvinsert.item.iSelectedImage = 0; 
+        tvinsert.item.iImage = 0;
+        tvinsert.item.iSelectedImage = 0;
     }
     else
     {
-        tvinsert.item.iImage = 1;        
-        tvinsert.item.iSelectedImage = 1; 
+        tvinsert.item.iImage = 1;
+        tvinsert.item.iSelectedImage = 1;
     }
 
     return TreeView_InsertItem(hTreeView, &tvinsert);
@@ -189,7 +145,7 @@ void GetUSBDevices()
     DeviceInfo* tempDevices = ListConnectedUSBDevices(&usbDeviceProfileCount);
     if (tempDevices != nullptr)
     {
-        for (size_t i = 0; i < usbDeviceProfileCount && i < 256; ++i) 
+        for (size_t i = 0; i < usbDeviceProfileCount && i < 256; ++i)
         {
             usbDeviceProfile[i] = tempDevices[i];
             WCHAR escapedID[MAX_BUFFER_SIZE];
@@ -198,30 +154,8 @@ void GetUSBDevices()
             usbDeviceProfile[i].IsConnected = IsUsbDeviceConnected(pSvc, escapedID);
 
             GetDiskPathFromDeviceID(pSvc, escapedID);
-               
-
         }
-        delete[] tempDevices; 
-    }
-}
-
-void GetBluetoothDevices()
-{
-    ClearBluetoothList();
-    DeviceInfo* tempDevices = QueryDevices(
-        pSvc,
-        L"SELECT * FROM Win32_PnPEntity WHERE Description LIKE '%Bluetooth%' AND DeviceID LIKE '%DEV_%'",
-        &bluetoothDeviceProfileCount
-    );
-
-    if (tempDevices != NULL) 
-    {
-        for (size_t i = 0; i < bluetoothDeviceProfileCount && i < 256; i++)
-        {
-            bluetoothDeviceProfile[i] = tempDevices[i];
-            bluetoothDeviceProfile[i].IsConnected = IsBluetoothDeviceConnected(bluetoothDeviceProfile[i].Caption);
-        }
-        delete[] tempDevices; 
+        delete[] tempDevices;
     }
 }
 
@@ -235,38 +169,15 @@ void PopulateTreeViewWithDevices(HWND hTreeView)
     {
         HTREEITEM hDeviceItem = AddTreeViewItem(hTreeView, hUsbRootItem, usbDeviceProfile[i].Caption, i, TRUE);
     }
-    GetBluetoothDevices();
-    HTREEITEM hBluetoothRootItem = AddTreeViewItem(hTreeView, NULL, L"Bluetooth устройства", -1, FALSE);
-    for (int i = 0; i < bluetoothDeviceProfileCount; i++)
-    {
-        HTREEITEM hDeviceItem = AddTreeViewItem(hTreeView, hBluetoothRootItem, bluetoothDeviceProfile[i].Caption, i, FALSE);
-    }
-}
-
-void ChangeState(BOOL isUSBDevice)
-{
-    if (isUSBDevice)
-    {
-        if (selectedIndex < 0 || selectedIndex >= usbDeviceProfileCount) return;
-
-        DeviceInfo* deviceInfo = &usbDeviceProfile[selectedIndex];
-        if (ChangeUSBDeviceState(deviceInfo->DeviceID, deviceInfo->IsConnected))
-        {
-            deviceInfo->IsConnected = !deviceInfo->IsConnected;
-        }
-        DisplayDeviceInfo(hInfoText, selectedIndex, FALSE);
-    }
 }
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     static HWND hTreeView;
-    static HTREEITEM hUsbRootItem;
-    static HTREEITEM hBluetoothRootItem;
     static HBRUSH hBrushWhite;
     static HIMAGELIST hImageList;
 
-    switch (uMsg) 
+    switch (uMsg)
     {
     case WM_ERASEBKGND:
     {
@@ -276,53 +187,46 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         FillRect(hdc, &rect, hBrushWhite);
     }
     break;
+
     case WM_CREATE:
     {
         hBrushWhite = CreateSolidBrush(RGB(255, 255, 255));
+
+        // Создаем дерево (TreeView)
         hTreeView = CreateWindowExW(0, WC_TREEVIEW, L"", WS_VISIBLE | WS_CHILD | WS_BORDER | TVS_HASLINES | TVS_LINESATROOT,
             10, 10, 300, 400, hwnd, (HMENU)IDC_TREEVIEW, NULL, NULL);
-        hInfoText = CreateWindowExW(
-            0,                     
-            WC_EDIT,                  
-            L"",                    
-            WS_VISIBLE | WS_CHILD | WS_BORDER | ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_HSCROLL, 
-            320,                       
-            10,                       
-            450,                 
-            350,                        
-            hwnd,                      
-            (HMENU)IDC_INFOTEXT,        
-            NULL,                
-            NULL                       
-        );
-        HFONT hFont = CreateFontW(
-            16,                        // Высота шрифта
-            0,                         // Ширина шрифта (0 — автоматически)
-            0,                         // Угол наклона шрифта
-            0,                         // Ориентация текста
-            FW_NORMAL,                 // Толщина шрифта
-            FALSE,                     // Не наклонный шрифт
-            FALSE,                     // Не подчеркивание
-            FALSE,                     // Без зачеркивания
-            DEFAULT_CHARSET,           // Кодировка
-            OUT_DEFAULT_PRECIS,        // Точность
-            CLIP_DEFAULT_PRECIS,       // Поведение при выходе за границы
-            DEFAULT_QUALITY,           // Качество
-            DEFAULT_PITCH,             // Вид шрифта
-            L"Arial"                   // Название шрифта
-        );
-        hSButton = CreateWindowExW(0,
-            L"BUTTON", 
-            L"",  
-            WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,  
-            330, 370, 120, 30,  
-            hwnd, 
-            (HMENU)IDC_SBUTTON, 
-            NULL,  
-            NULL
-        );
-        ShowWindow((HWND)hSButton, SW_HIDE);
-        SendMessage(hInfoText, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        // Создаем Tab Control
+        hTabControl = CreateWindowExW(WS_EX_CONTROLPARENT, WC_TABCONTROL, NULL,
+            WS_VISIBLE | WS_CHILD | WS_CLIPSIBLINGS | WS_BORDER,
+            320, 10, 450, 400, hwnd, NULL, GetModuleHandle(NULL), NULL);
+
+        // Настройка Tab Control
+        TCITEM tie;
+        tie.mask = TCIF_TEXT;
+
+        // Вкладка Device
+        tie.pszText = (LPWSTR)L"Device";
+        TabCtrl_InsertItem(hTabControl, 0, &tie);
+
+        // Вкладка Driver
+        tie.pszText = (LPWSTR)L"Driver";
+        TabCtrl_InsertItem(hTabControl, 1, &tie);
+
+        // Создаем страницы как диалоговые окна (дочерние элементы) и убираем лишние стили
+        hPages[0] = CreateDialog(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_DIALOG1), hTabControl, Page1Proc);
+        hPages[1] = CreateDialog(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_DIALOG2), hTabControl, Page2Proc);
+
+        for (int i = 0; i < 2; ++i) {
+            SetWindowLongPtr(hPages[i], GWL_STYLE, GetWindowLongPtr(hPages[i], GWL_STYLE) & ~WS_BORDER & ~WS_CAPTION);
+            SetWindowPos(hPages[i], NULL, 5, 25, 440, 370, SWP_NOZORDER);
+        }
+
+        // Показываем только первую страницу по умолчанию
+        ShowWindow(hPages[0], SW_SHOW);
+        ShowWindow(hPages[1], SW_HIDE);
+
+        // Создаем список изображений для TreeView
         hImageList = ImageList_Create(16, 16, ILC_COLOR32 | ILC_MASK, 2, 2);
         ImageList_SetBkColor(hImageList, CLR_NONE);
 
@@ -336,39 +240,18 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         PopulateTreeViewWithDevices(hTreeView);
     }
     break;
-    case WM_COMMAND: 
-    {
-        if (LOWORD(wParam) == IDC_SBUTTON)
-        {  
-            MessageBox(hwnd, L"Кнопка нажата", L"Сообщение", MB_OK);
 
-            HTREEITEM hUsbRootItem = TreeView_GetChild(hTreeView, NULL);
-            HTREEITEM hBluetoothRootItem = TreeView_GetNextSibling(hTreeView, hUsbRootItem);
-
-            if (selectedItem != NULL)
+    case WM_NOTIFY:
+        if (((LPNMHDR)lParam)->hwndFrom == hTabControl && ((LPNMHDR)lParam)->code == TCN_SELCHANGE)
+        {
+            // Обработка переключения вкладок
+            int iPage = TabCtrl_GetCurSel(hTabControl);
+            for (int i = 0; i < 2; ++i)
             {
-                if (TreeView_GetParent(hTreeView, selectedItem) == hUsbRootItem)
-                {
-                    ChangeState(TRUE);
-                }
-                else if (TreeView_GetParent(hTreeView, selectedItem) == hBluetoothRootItem)
-                {
-                    ChangeState(FALSE);
-                }
+                ShowWindow(hPages[i], (i == iPage) ? SW_SHOW : SW_HIDE);
             }
         }
-    }
-    break;
-    case WM_DEVICECHANGE:
-    {
- //       std::this_thread::sleep_for(std::chrono::milliseconds(5000));
-        SetWindowTextW(hInfoText, L"");
-        ClearTree(hTreeView);
-        PopulateTreeViewWithDevices(hTreeView);
-    }
-    break;
-    case WM_NOTIFY:
-        if (((LPNMHDR)lParam)->hwndFrom == hTreeView)
+        else if (((LPNMHDR)lParam)->hwndFrom == hTreeView)
         {
             LPNMTREEVIEW pnmTreeView = (LPNMTREEVIEW)lParam;
             if (pnmTreeView->hdr.code == NM_DBLCLK) {
@@ -386,20 +269,32 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                 {
                     if (TreeView_GetParent(hTreeView, selectedItem) == hUsbRootItem)
                     {
-                        DisplayDeviceInfo(hInfoText, selectedIndex, FALSE);
+                        // Выбран элемент USB
+                        WCHAR escapedID[MAX_BUFFER_SIZE];
+                        wcscpy_s(escapedID, MAX_BUFFER_SIZE, usbDeviceProfile[selectedIndex].DeviceID);
+                        EscapeBackslashes(escapedID);
+
+                        WCHAR entityQuery[MAX_BUFFER_SIZE];
+                        WCHAR driverQuery[MAX_BUFFER_SIZE];
+                        swprintf_s(entityQuery, MAX_BUFFER_SIZE, L"SELECT * FROM Win32_PnPEntity WHERE DeviceID = '%s'", escapedID);
+                        swprintf_s(driverQuery, MAX_BUFFER_SIZE, L"SELECT * FROM Win32_PnPSignedDriver WHERE DeviceID = '%s'", escapedID);
+
+                        DisplayFullInfo(&usbDeviceProfile[selectedIndex], entityQuery, driverQuery);
                     }
-                    else if (TreeView_GetParent(hTreeView, selectedItem) == hBluetoothRootItem)
-                    {
-                        DisplayDeviceInfo(hInfoText, selectedIndex, TRUE);
-                    }
+                    // Показываем первую вкладку по умолчанию
+                    TabCtrl_SetCurSel(hTabControl, 0);
+                    ShowWindow(hPages[0], SW_SHOW);
+                    ShowWindow(hPages[1], SW_HIDE);
                 }
             }
         }
         break;
+
     case WM_DESTROY:
         DeleteObject(hBrushWhite);
         PostQuitMessage(0);
         break;
+
     default:
         return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
@@ -421,14 +316,145 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     HWND hwnd = CreateWindowExW(0, L"DeviceInfoApp", L"Device Information", WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT, 800, 450, NULL, NULL, hInstance, NULL);
     ShowWindow(hwnd, nShowCmd);
-   
+
     if (FAILED(hres)) return 1;
 
-    while (GetMessage(&msg, NULL, 0, 0)) 
+    while (GetMessage(&msg, NULL, 0, 0))
     {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
     CoUninitialize();
     return 0;
+}
+
+// Функция для создания общих элементов
+void CreatePageDeviceControls(HWND hwndDlg) {
+    // Создать текстовое поле с увеличенной высотой
+    CreateWindowExW(
+        0,
+        WC_EDIT,
+        L"",
+        WS_VISIBLE | WS_CHILD | WS_BORDER | ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_HSCROLL,
+        10,          // Отступ слева
+        10,          // Отступ сверху
+        420,         // Ширина текстового поля (уменьшили на 30 пикселей для отступов)
+        300,         // Увеличенная высота текстового поля
+        hwndDlg,
+        (HMENU)IDC_INFOTEXT,
+        NULL,
+        NULL
+    );
+
+    // Создать кнопку ниже текстового поля
+    CreateWindowExW(
+        0,
+        WC_BUTTON,
+        L"Click Me",
+        WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
+        10,          // Отступ слева
+        320,         // Позиция ниже текстового поля
+        100,         // Ширина кнопки
+        30,          // Высота кнопки
+        hwndDlg,
+        (HMENU)IDC_BUTTON_S,
+        NULL,
+        NULL
+    );
+}
+
+// Функция для создания общих элементов
+void CreatePageDriveerControls(HWND hwndDlg) {
+    // Создать текстовое поле с увеличенной высотой
+    CreateWindowExW(
+        0,
+        WC_EDIT,
+        L"",
+        WS_VISIBLE | WS_CHILD | WS_BORDER | ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_HSCROLL,
+        10,          // Отступ слева
+        10,          // Отступ сверху
+        420,         // Ширина текстового поля (уменьшили на 30 пикселей для отступов)
+        300,         // Увеличенная высота текстового поля
+        hwndDlg,
+        (HMENU)IDC_INFOTEXT,
+        NULL,
+        NULL
+    );
+
+    // Создать кнопку ниже текстового поля
+    CreateWindowExW(
+        0,
+        WC_BUTTON,
+        L"Click Me",
+        WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
+        10,          // Отступ слева
+        320,         // Позиция ниже текстового поля
+        100,         // Ширина кнопки
+        30,          // Высота кнопки
+        hwndDlg,
+        (HMENU)IDC_BUTTON_U,
+        NULL,
+        NULL
+    );
+    // Создать кнопку ниже текстового поля
+    CreateWindowExW(
+        0,
+        WC_BUTTON,
+        L"Click Me",
+        WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
+        10,          // Отступ слева
+        320,         // Позиция ниже текстового поля
+        100,         // Ширина кнопки
+        30,          // Высота кнопки
+        hwndDlg,
+        (HMENU)IDC_BUTTON_D,
+        NULL,
+        NULL
+    );
+    // Создать кнопку ниже текстового поля
+    CreateWindowExW(
+        0,
+        WC_BUTTON,
+        L"Click Me",
+        WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
+        10,          // Отступ слева
+        320,         // Позиция ниже текстового поля
+        100,         // Ширина кнопки
+        30,          // Высота кнопки
+        hwndDlg,
+        (HMENU)IDC_BUTTON_R,
+        NULL,
+        NULL
+    );
+}
+
+// Обработчик первой страницы
+INT_PTR CALLBACK Page1Proc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {
+    case WM_INITDIALOG:
+        CreatePageDeviceControls(hwndDlg); // Создаем элементы на странице 1
+        return TRUE;
+    case WM_COMMAND:
+        if (LOWORD(wParam) == IDC_BUTTON) 
+        {
+            MessageBox(hwndDlg, L"Button on Page 1 clicked!", L"Info", MB_OK);
+        }
+        return TRUE;
+    }
+    return FALSE;
+}
+
+// Обработчик второй страницы
+INT_PTR CALLBACK Page2Proc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {
+    case WM_INITDIALOG:
+        CreatePageDriveerControls(hwndDlg); // Создаем элементы на странице 2
+        return TRUE;
+    case WM_COMMAND:
+        if (LOWORD(wParam) == IDC_BUTTON) {
+            MessageBox(hwndDlg, L"Button on Page 2 clicked!", L"Info", MB_OK);
+        }
+        return TRUE;
+    }
+    return FALSE;
 }
