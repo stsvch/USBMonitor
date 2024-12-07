@@ -18,3 +18,14 @@ FONT 8, "MS Shell Dlg"
 BEGIN
     LTEXT           "Bluetooth Information:", -1, 10, 10, 230, 140
 END
+
+
+IDD_DRIVER_SELECTION DIALOGEX 0, 0, 400, 250
+STYLE DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Выбор драйвера"
+FONT 8, "MS Shell Dlg"
+BEGIN
+CONTROL         "", IDC_LISTBOX, "ListBox", LBS_STANDARD | WS_VSCROLL, 10, 10, 280, 200
+PUSHBUTTON      "Выбрать", IDOK, 60, 220, 50, 14
+PUSHBUTTON      "Отмена", IDCANCEL, 120, 220, 50, 14
+END

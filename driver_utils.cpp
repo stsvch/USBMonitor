@@ -171,42 +171,112 @@ void OnBrowseAndInstallDriver(HWND hwnd)
     }
 }
 
-// Функция для отображения диалогового окна выбора драйвера и возврата пути к выбранному драйверу
-LPWSTR ShowDriverSelectionDialog(HWND hwnd)
+INT_PTR CALLBACK DriverSelectionProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    static WCHAR** drivers;
+    static int driverCount;
+
+    switch (message)
+    {
+    case WM_INITDIALOG:
+        drivers = (WCHAR**)lParam; // Get the pointer to the driver array
+        driverCount = 0;
+
+        // Populate the listbox with drivers
+        while (drivers[driverCount] != NULL) {
+            SendDlgItemMessage(hDlg, IDC_LISTBOX, LB_ADDSTRING, 0, (LPARAM)drivers[driverCount]);
+            driverCount++;
+        }
+        return (INT_PTR)TRUE;
+
+    case WM_COMMAND:
+        if (LOWORD(wParam) == IDOK) {
+            // Get the selected driver's index
+            int selected = (int)SendDlgItemMessage(hDlg, IDC_LISTBOX, LB_GETCURSEL, 0, 0);
+            if (selected != LB_ERR) {
+                EndDialog(hDlg, selected);
+                return (INT_PTR)TRUE;
+            }
+        }
+        else if (LOWORD(wParam) == IDCANCEL) {
+            EndDialog(hDlg, -1);
+            return (INT_PTR)TRUE;
+        }
+        break;
+    }
+    return (INT_PTR)FALSE;
+}
+
+LPWSTR ShowDriverSelectionDialog(HWND hwnd, LPCWSTR deviceId)
 {
     HDEVINFO deviceInfoSet;
     SP_DEVINFO_DATA deviceInfoData;
     SP_DRVINFO_DATA driverInfoData;
-    WCHAR drivers[1024][MAX_PATH]; // Массив для хранения описаний драйверов
+    WCHAR** drivers = NULL; // Dynamic array of pointers
     int driverCount = 0;
 
-    // Получаем список всех устройств в системе
-    deviceInfoSet = SetupDiGetClassDevs(NULL, NULL, NULL, DIGCF_ALLCLASSES | DIGCF_PRESENT);
+    // Get the list of all devices in the system
+    deviceInfoSet = SetupDiGetClassDevs(NULL, NULL, NULL, DIGCF_PRESENT | DIGCF_ALLCLASSES);
     if (deviceInfoSet == INVALID_HANDLE_VALUE) {
-        MessageBox(hwnd, L"Не удалось получить список устройств.", L"Ошибка", MB_OK | MB_ICONERROR);
+        MessageBox(hwnd, L"Failed to get the list of devices.", L"Error", MB_OK | MB_ICONERROR);
         return NULL;
     }
 
     deviceInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
     int deviceIndex = 0;
 
-    // Перебираем все устройства
+    // Enumerate all devices
     while (SetupDiEnumDeviceInfo(deviceInfoSet, deviceIndex, &deviceInfoData)) {
         deviceIndex++;
 
-        // Создаем список доступных драйверов для текущего устройства
-        if (SetupDiBuildDriverInfoList(deviceInfoSet, &deviceInfoData, SPDIT_COMPATDRIVER)) {
-            int driverIndex = 0;
-            driverInfoData.cbSize = sizeof(SP_DRVINFO_DATA);
+        // Get the device ID of the current device
+        WCHAR currentDeviceId[MAX_DEVICE_ID_LEN];
+        if (SetupDiGetDeviceInstanceId(deviceInfoSet, &deviceInfoData, currentDeviceId, MAX_DEVICE_ID_LEN, NULL)) {
+            // Compare the current device ID with the passed deviceId
+            if (_wcsicmp(currentDeviceId, deviceId) == 0) {
+                // If deviceId matches, process drivers
+                if (SetupDiBuildDriverInfoList(deviceInfoSet, &deviceInfoData, SPDIT_COMPATDRIVER)) {
+                    int driverIndex = 0;
+                    driverInfoData.cbSize = sizeof(SP_DRVINFO_DATA);
 
-            // Перебираем доступные драйверы
-            while (SetupDiEnumDriverInfo(deviceInfoSet, &deviceInfoData, SPDIT_COMPATDRIVER, driverIndex, &driverInfoData)) {
-                driverIndex++;
+                    // Enumerate available drivers
+                    while (SetupDiEnumDriverInfo(deviceInfoSet, &deviceInfoData, SPDIT_COMPATDRIVER, driverIndex, &driverInfoData)) {
+                        driverIndex++;
 
-                // Сохраняем информацию о драйвере в список
-                if (driverCount < 1024) {
-                    wcscpy_s(drivers[driverCount], driverInfoData.Description);
-                    driverCount++;
+                        // Retrieve detailed driver info
+                        DWORD requiredSize = 0;
+                        SetupDiGetDriverInfoDetail(deviceInfoSet, &deviceInfoData, &driverInfoData, NULL, 0, &requiredSize);
+
+                        if (GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
+                            SP_DRVINFO_DETAIL_DATA* driverDetailData = (SP_DRVINFO_DETAIL_DATA*)malloc(requiredSize);
+                            if (driverDetailData) {
+                                driverDetailData->cbSize = sizeof(SP_DRVINFO_DETAIL_DATA);
+                                if (SetupDiGetDriverInfoDetail(deviceInfoSet, &deviceInfoData, &driverInfoData, driverDetailData, requiredSize, NULL)) {
+                                    // Save the INF filename only
+                                    WCHAR* driverInfo = (WCHAR*)malloc((lstrlenW(driverDetailData->InfFileName) + 1) * sizeof(WCHAR));
+                                    if (driverInfo) {
+                                        wcscpy_s(driverInfo, lstrlenW(driverDetailData->InfFileName) + 1, driverDetailData->InfFileName);
+                                        drivers = (WCHAR**)realloc(drivers, (driverCount + 1) * sizeof(WCHAR*));
+                                        drivers[driverCount] = driverInfo;
+                                        driverCount++;
+                                    }
+                                }
+                                else {
+                                    DWORD error = GetLastError();
+                                    WCHAR errorMessage[256];
+                                    wsprintf(errorMessage, L"SetupDiGetDriverInfoDetail failed even with allocated buffer. Error code: %lu", error);
+                                    MessageBox(hwnd, errorMessage, L"Error", MB_OK | MB_ICONERROR);
+                                }
+                                free(driverDetailData);
+                            }
+                            else {
+                                MessageBox(hwnd, L"Failed to allocate memory for driver detail.", L"Error", MB_OK | MB_ICONERROR);
+                            }
+                        }
+                    }
+                }
+                else {
+                    MessageBox(hwnd, L"Failed to build driver info list.", L"Error", MB_OK | MB_ICONERROR);
                 }
             }
         }
@@ -214,51 +284,37 @@ LPWSTR ShowDriverSelectionDialog(HWND hwnd)
 
     SetupDiDestroyDeviceInfoList(deviceInfoSet);
 
-    // Создаем диалоговое окно с доступными драйверами
-    if (driverCount == 0) {
-        MessageBox(hwnd, L"Нет доступных драйверов для выбора.", L"Информация", MB_OK | MB_ICONINFORMATION);
+    // Check if any drivers are available
+    if (driverCount == 0) 
+    {
+        MessageBox(hwnd, L"No available drivers for selection.", L"И", MB_OK | MB_ICONINFORMATION);
         return NULL;
     }
 
-    // Формируем строку с описанием всех доступных драйверов
-    WCHAR driverList[4096] = L"";
-    for (int i = 0; i < driverCount; ++i) {
-        WCHAR line[128];
-        swprintf_s(line, L"%d: %s\n", i + 1, drivers[i]);
-        wcscat_s(driverList, line);
-    }
+    // Add terminating NULL to the array
+    drivers = (WCHAR**)realloc(drivers, (driverCount + 1) * sizeof(WCHAR*));
+    drivers[driverCount] = NULL;
 
-    // Показываем список пользователю
-    MessageBox(hwnd, driverList, L"Доступные драйверы", MB_OK | MB_ICONINFORMATION);
-
-    // Запрашиваем у пользователя выбор драйвера
-    WCHAR inputBuffer[10];
+    // Create the driver selection dialog
     int selectedDriverIndex = -1;
-    while (selectedDriverIndex < 1 || selectedDriverIndex > driverCount) {
-        // Попросим пользователя ввести номер драйвера
-        int response = MessageBox(hwnd, L"Введите номер выбранного драйвера (например, 1):", L"Выбор драйвера", MB_OKCANCEL | MB_ICONQUESTION);
-        if (response == IDCANCEL) {
-            return NULL; // Если пользователь отменил выбор
-        }
+    selectedDriverIndex = DialogBoxParam(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_DRIVER_SELECTION), hwnd, DriverSelectionProc, (LPARAM)drivers);
 
-        // Получаем номер драйвера
-        if (GetWindowText(hwnd, inputBuffer, sizeof(inputBuffer) / sizeof(WCHAR)) != 0) {
-            selectedDriverIndex = _wtoi(inputBuffer);
-        }
-
-        // Проверяем, что выбранный индекс допустим
-        if (selectedDriverIndex < 1 || selectedDriverIndex > driverCount) {
-            MessageBox(hwnd, L"Некорректный номер драйвера. Пожалуйста, попробуйте снова.", L"Ошибка", MB_OK | MB_ICONERROR);
+    LPWSTR selectedDriver = NULL;
+    if (selectedDriverIndex >= 0 && selectedDriverIndex < driverCount) 
+    {
+        selectedDriver = (LPWSTR)malloc((lstrlenW(drivers[selectedDriverIndex]) + 1) * sizeof(WCHAR));
+        if (selectedDriver) 
+        {
+            wcscpy_s(selectedDriver, lstrlenW(drivers[selectedDriverIndex]) + 1, drivers[selectedDriverIndex]);
         }
     }
 
-    // Если пользователь выбрал корректный драйвер, возвращаем его описание
-    if (selectedDriverIndex >= 1 && selectedDriverIndex <= driverCount) {
-        LPWSTR selectedDriver = (LPWSTR)LocalAlloc(LPTR, (lstrlenW(drivers[selectedDriverIndex - 1]) + 1) * sizeof(WCHAR));
-        if (selectedDriver) {
-            wcscpy_s(selectedDriver, lstrlenW(drivers[selectedDriverIndex - 1]) + 1, drivers[selectedDriverIndex - 1]);
-        }
-        return selectedDriver;
+    // Free memory
+    for (int i = 0; i < driverCount; i++) 
+    {
+        free(drivers[i]);
     }
-    return NULL;
+    free(drivers);
+
+    return selectedDriver;
 }

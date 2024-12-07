@@ -1,24 +1,15 @@
 #include "wmi_utils.h"
 #include "usb_utils.h"
+#include "driver_utils.h"
 #include "resource.h"
 #include <windows.h>
 #include <commctrl.h>
 
 #pragma comment(lib, "comctl32.lib")
 
-#define IDC_TREEVIEW 1
-#define IDC_INFOTEXT 2
-#define IDC_BUTTON_S   3
-#define IDC_BUTTON_U   4
-#define IDC_BUTTON_D   5
-#define IDC_BUTTON_R   6
-
-// Обработчики страниц
 INT_PTR CALLBACK Page1Proc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK Page2Proc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
-HWND hSButton = NULL;
-HWND hInfoText = NULL;
 HTREEITEM selectedItem = NULL;
 DeviceInfo usbDeviceProfile[256];
 int usbDeviceProfileCount = 0;
@@ -61,11 +52,11 @@ void DisplayFullInfo(const DeviceInfo* deviceInfo, const WCHAR* entityQuery, con
     swprintf_s(deviceInfoBuffer, MAX_BUFFER_SIZE, L"%s: %s\r\n", L"Connected", deviceInfo->IsConnected ? L"True" : L"False");
     if (deviceInfo->IsConnected)
     {
-        SetWindowText((HWND)hSButton, L"Отключить");
+        SetWindowText(GetDlgItem(hPages[0], IDC_BUTTON_S), L"Отключить");
     }
     else
     {
-        SetWindowText((HWND)hSButton, L"Подключить");
+        SetWindowText(GetDlgItem(hPages[0], IDC_BUTTON_S), L"Подключить");
     }
 
     if (resultCount > 0 && deviceDetails)
@@ -161,7 +152,6 @@ void GetUSBDevices()
 
 void PopulateTreeViewWithDevices(HWND hTreeView)
 {
-    ShowWindow((HWND)hSButton, SW_HIDE);
     TreeView_DeleteAllItems(hTreeView);
     GetUSBDevices();
     HTREEITEM hUsbRootItem = AddTreeViewItem(hTreeView, NULL, L"USB устройства", -1, TRUE);
@@ -364,7 +354,8 @@ void CreatePageDeviceControls(HWND hwndDlg) {
 }
 
 // Функция для создания общих элементов
-void CreatePageDriveerControls(HWND hwndDlg) {
+void CreatePageDriveerControls(HWND hwndDlg) 
+{
     // Создать текстовое поле с увеличенной высотой
     CreateWindowExW(
         0,
@@ -385,7 +376,7 @@ void CreatePageDriveerControls(HWND hwndDlg) {
     CreateWindowExW(
         0,
         WC_BUTTON,
-        L"Click Me",
+        L"Обновить",
         WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
         10,          // Отступ слева
         320,         // Позиция ниже текстового поля
@@ -400,9 +391,9 @@ void CreatePageDriveerControls(HWND hwndDlg) {
     CreateWindowExW(
         0,
         WC_BUTTON,
-        L"Click Me",
+        L"Отключить",
         WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-        10,          // Отступ слева
+        120,          // Отступ слева
         320,         // Позиция ниже текстового поля
         100,         // Ширина кнопки
         30,          // Высота кнопки
@@ -415,9 +406,9 @@ void CreatePageDriveerControls(HWND hwndDlg) {
     CreateWindowExW(
         0,
         WC_BUTTON,
-        L"Click Me",
+        L"Откатить",
         WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-        10,          // Отступ слева
+        230,          // Отступ слева
         320,         // Позиция ниже текстового поля
         100,         // Ширина кнопки
         30,          // Высота кнопки
@@ -428,31 +419,43 @@ void CreatePageDriveerControls(HWND hwndDlg) {
     );
 }
 
-// Обработчик первой страницы
-INT_PTR CALLBACK Page1Proc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    switch (uMsg) {
+INT_PTR CALLBACK Page1Proc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    switch (uMsg) 
+    {
     case WM_INITDIALOG:
-        CreatePageDeviceControls(hwndDlg); // Создаем элементы на странице 1
+        CreatePageDeviceControls(hwndDlg); 
         return TRUE;
     case WM_COMMAND:
-        if (LOWORD(wParam) == IDC_BUTTON) 
+        if (LOWORD(wParam) == IDC_BUTTON_S) 
         {
-            MessageBox(hwndDlg, L"Button on Page 1 clicked!", L"Info", MB_OK);
+            ChangeUSBDeviceState(usbDeviceProfile[selectedIndex].DeviceID, usbDeviceProfile[selectedIndex].IsConnected);
         }
         return TRUE;
     }
     return FALSE;
 }
 
-// Обработчик второй страницы
-INT_PTR CALLBACK Page2Proc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    switch (uMsg) {
+INT_PTR CALLBACK Page2Proc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    switch (uMsg) 
+    {
     case WM_INITDIALOG:
-        CreatePageDriveerControls(hwndDlg); // Создаем элементы на странице 2
+        CreatePageDriveerControls(hwndDlg);
         return TRUE;
     case WM_COMMAND:
-        if (LOWORD(wParam) == IDC_BUTTON) {
+        if (LOWORD(wParam) == IDC_BUTTON_D) 
+        {
             MessageBox(hwndDlg, L"Button on Page 2 clicked!", L"Info", MB_OK);
+        }
+        else if (LOWORD(wParam) == IDC_BUTTON_R)
+        {
+
+        }
+        else if (LOWORD(wParam) == IDC_BUTTON_U)
+        {
+            WCHAR* path = ShowDriverSelectionDialog(hwndDlg, usbDeviceProfile[selectedIndex].DeviceID);
+            int a = 1;
         }
         return TRUE;
     }
