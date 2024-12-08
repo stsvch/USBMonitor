@@ -27,7 +27,9 @@ void RemoveDriver(const WCHAR* deviceId) {
         StringCchPrintfW(messageBuffer, 256, L"Ошибка удаления драйвера. Код ошибки: %lu", dwError);
         MessageBoxW(NULL, messageBuffer, L"Ошибка", MB_OK | MB_ICONERROR);
     }
-    else {
+    else 
+    {
+        DeleteDriverHistory(deviceId);
         MessageBoxW(NULL, L"Устройство успешно удалено.", L"Информация", MB_OK | MB_ICONINFORMATION);
     }
 
@@ -83,6 +85,7 @@ void InstallDriver(const WCHAR* deviceId, const WCHAR* infPath) {
     // Очищаем список устройств
     SetupDiDestroyDeviceInfoList(hDevInfo);
 }
+
 WCHAR selectedFilePath[260] = { 0 };
 
 // Функция для отката драйвера
@@ -124,6 +127,7 @@ void RollbackDriver(const WCHAR* deviceIdentifier)
 
                 if (updateResult) {
                     MessageBoxW(NULL, L"Driver rollback successful.", L"Success", MB_OK | MB_ICONINFORMATION);
+                    DeleteLastDriverHistory(deviceIdentifier);
                 }
                 else {
                     WCHAR errorMsg[256];

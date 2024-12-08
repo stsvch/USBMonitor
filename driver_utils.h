@@ -19,3 +19,4 @@ void RollbackDriver(const WCHAR* deviceIdentifier);
 void RemoveDriver(const WCHAR* deviceId);
 void InstallDriver(const WCHAR* deviceId, const WCHAR* infPath);
 LPWSTR ShowDriverSelectionDialog(HWND hwnd, LPCWSTR deviceId);
+void DeleteDriverHistory(const WCHAR* deviceID);

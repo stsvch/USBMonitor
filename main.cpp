@@ -17,7 +17,7 @@ IWbemLocator* pLoc = NULL;
 IWbemServices* pSvc = NULL;
 int selectedIndex = -2;
 
-HWND hPages[2]; // Массив для страниц вкладок
+HWND hPages[2];
 HWND hTabControl;
 
 void ClearUSBList()
@@ -48,7 +48,6 @@ void DisplayFullInfo(const DeviceInfo* deviceInfo, const WCHAR* entityQuery, con
     int resultCount = 0;
     Map* deviceDetails = FullQueryDevices(pSvc, entityQuery, &resultCount);
 
-    // Собираем информацию об устройстве
     swprintf_s(deviceInfoBuffer, MAX_BUFFER_SIZE, L"%s: %s\r\n", L"Connected", deviceInfo->IsConnected ? L"True" : L"False");
     if (deviceInfo->IsConnected)
     {
@@ -78,7 +77,6 @@ void DisplayFullInfo(const DeviceInfo* deviceInfo, const WCHAR* entityQuery, con
         delete[] deviceDetails;
     }
 
-    // Собираем информацию о драйверах
     resultCount = 0;
     Map* driverDetails = FullQueryDevices(pSvc, driverQuery, &resultCount);
 
@@ -101,9 +99,8 @@ void DisplayFullInfo(const DeviceInfo* deviceInfo, const WCHAR* entityQuery, con
         delete[] driverDetails;
     }
 
-    // Устанавливаем текст на вкладках
-    SetWindowTextW(GetDlgItem(hPages[0], IDC_INFOTEXT), deviceInfoBuffer);  // Вкладка "Device"
-    SetWindowTextW(GetDlgItem(hPages[1], IDC_INFOTEXT), driverInfoBuffer);  // Вкладка "Driver"
+    SetWindowTextW(GetDlgItem(hPages[0], IDC_INFOTEXT), deviceInfoBuffer);
+    SetWindowTextW(GetDlgItem(hPages[1], IDC_INFOTEXT), driverInfoBuffer);  
 }
 
 HTREEITEM AddTreeViewItem(HWND hTreeView, HTREEITEM hParent, const WCHAR* text, int deviceIndex, BOOL isUsb)
@@ -177,33 +174,26 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         FillRect(hdc, &rect, hBrushWhite);
     }
     break;
-
     case WM_CREATE:
     {
         hBrushWhite = CreateSolidBrush(RGB(255, 255, 255));
 
-        // Создаем дерево (TreeView)
         hTreeView = CreateWindowExW(0, WC_TREEVIEW, L"", WS_VISIBLE | WS_CHILD | WS_BORDER | TVS_HASLINES | TVS_LINESATROOT,
             10, 10, 300, 400, hwnd, (HMENU)IDC_TREEVIEW, NULL, NULL);
 
-        // Создаем Tab Control
         hTabControl = CreateWindowExW(WS_EX_CONTROLPARENT, WC_TABCONTROL, NULL,
             WS_VISIBLE | WS_CHILD | WS_CLIPSIBLINGS | WS_BORDER,
             320, 10, 450, 400, hwnd, NULL, GetModuleHandle(NULL), NULL);
 
-        // Настройка Tab Control
         TCITEM tie;
         tie.mask = TCIF_TEXT;
 
-        // Вкладка Device
-        tie.pszText = (LPWSTR)L"Device";
+        tie.pszText = (LPWSTR)L"Устройство";
         TabCtrl_InsertItem(hTabControl, 0, &tie);
 
-        // Вкладка Driver
-        tie.pszText = (LPWSTR)L"Driver";
+        tie.pszText = (LPWSTR)L"Драйвер";
         TabCtrl_InsertItem(hTabControl, 1, &tie);
 
-        // Создаем страницы как диалоговые окна (дочерние элементы) и убираем лишние стили
         hPages[0] = CreateDialog(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_DIALOG1), hTabControl, Page1Proc);
         hPages[1] = CreateDialog(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_DIALOG2), hTabControl, Page2Proc);
 
@@ -213,11 +203,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             SetWindowPos(hPages[i], NULL, 5, 25, 440, 370, SWP_NOZORDER);
         }
 
-        // Показываем только первую страницу по умолчанию
         ShowWindow(hPages[0], SW_SHOW);
         ShowWindow(hPages[1], SW_HIDE);
 
-        // Создаем список изображений для TreeView
         hImageList = ImageList_Create(16, 16, ILC_COLOR32 | ILC_MASK, 2, 2);
         ImageList_SetBkColor(hImageList, CLR_NONE);
 
@@ -235,7 +223,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     case WM_NOTIFY:
         if (((LPNMHDR)lParam)->hwndFrom == hTabControl && ((LPNMHDR)lParam)->code == TCN_SELCHANGE)
         {
-            // Обработка переключения вкладок
             int iPage = TabCtrl_GetCurSel(hTabControl);
             for (int i = 0; i < 2; ++i)
             {
@@ -260,7 +247,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                 {
                     if (TreeView_GetParent(hTreeView, selectedItem) == hUsbRootItem)
                     {
-                        // Выбран элемент USB
                         WCHAR escapedID[MAX_BUFFER_SIZE];
                         wcscpy_s(escapedID, MAX_BUFFER_SIZE, usbDeviceProfile[selectedIndex].DeviceID);
                         EscapeBackslashes(escapedID);
@@ -272,7 +258,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
                         DisplayFullInfo(&usbDeviceProfile[selectedIndex], entityQuery, driverQuery);
                     }
-                    // Показываем первую вкладку по умолчанию
                     TabCtrl_SetCurSel(hTabControl, 0);
                     ShowWindow(hPages[0], SW_SHOW);
                     ShowWindow(hPages[1], SW_HIDE);
@@ -280,7 +265,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             }
         }
         break;
-
+    case WM_DEVICECHANGE:
+    {
+        PopulateTreeViewWithDevices(hTreeView);
+    }
+    break;
     case WM_DESTROY:
         DeleteObject(hBrushWhite);
         PostQuitMessage(0);
@@ -292,7 +281,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     return 0;
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) 
+{
     MSG msg;
     WNDCLASS wc = { 0 };
     wc.lpfnWndProc = WindowProc;
@@ -319,34 +309,32 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     return 0;
 }
 
-// Функция для создания общих элементов
-void CreatePageDeviceControls(HWND hwndDlg) {
-    // Создать текстовое поле с увеличенной высотой
+void CreatePageDeviceControls(HWND hwndDlg) 
+{
     CreateWindowExW(
         0,
         WC_EDIT,
         L"",
         WS_VISIBLE | WS_CHILD | WS_BORDER | ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_HSCROLL,
-        10,          // Отступ слева
-        10,          // Отступ сверху
-        420,         // Ширина текстового поля (уменьшили на 30 пикселей для отступов)
-        300,         // Увеличенная высота текстового поля
+        10,       
+        10,        
+        420,       
+        300,        
         hwndDlg,
         (HMENU)IDC_INFOTEXT,
         NULL,
         NULL
     );
 
-    // Создать кнопку ниже текстового поля
     CreateWindowExW(
         0,
         WC_BUTTON,
-        L"Click Me",
+        L"",
         WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-        10,          // Отступ слева
-        320,         // Позиция ниже текстового поля
-        100,         // Ширина кнопки
-        30,          // Высота кнопки
+        10,        
+        320,      
+        100,        
+        30,        
         hwndDlg,
         (HMENU)IDC_BUTTON_S,
         NULL,
@@ -354,65 +342,62 @@ void CreatePageDeviceControls(HWND hwndDlg) {
     );
 }
 
-// Функция для создания общих элементов
 void CreatePageDriveerControls(HWND hwndDlg) 
 {
-    // Создать текстовое поле с увеличенной высотой
     CreateWindowExW(
         0,
         WC_EDIT,
         L"",
         WS_VISIBLE | WS_CHILD | WS_BORDER | ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_HSCROLL,
-        10,          // Отступ слева
-        10,          // Отступ сверху
-        420,         // Ширина текстового поля (уменьшили на 30 пикселей для отступов)
-        300,         // Увеличенная высота текстового поля
+        10,        
+        10,    
+        420,       
+        300,        
         hwndDlg,
         (HMENU)IDC_INFOTEXT,
         NULL,
         NULL
     );
 
-    // Создать кнопку ниже текстового поля
     CreateWindowExW(
         0,
         WC_BUTTON,
         L"Обновить",
         WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-        10,          // Отступ слева
-        320,         // Позиция ниже текстового поля
-        100,         // Ширина кнопки
-        30,          // Высота кнопки
+        10,        
+        320,        
+        100,      
+        30,          
         hwndDlg,
         (HMENU)IDC_BUTTON_U,
         NULL,
         NULL
     );
-    // Создать кнопку ниже текстового поля
+
     CreateWindowExW(
         0,
         WC_BUTTON,
         L"Отключить",
         WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-        120,          // Отступ слева
-        320,         // Позиция ниже текстового поля
-        100,         // Ширина кнопки
-        30,          // Высота кнопки
+        120,        
+        320,        
+        100,       
+        30,         
         hwndDlg,
         (HMENU)IDC_BUTTON_D,
         NULL,
         NULL
     );
-    // Создать кнопку ниже текстового поля
+
     CreateWindowExW(
         0,
         WC_BUTTON,
         L"Откатить",
         WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-        230,          // Отступ слева
-        320,         // Позиция ниже текстового поля
-        100,         // Ширина кнопки
-        30,          // Высота кнопки
+        230,         
+        320,        
+        100,      
+        30,        
         hwndDlg,
         (HMENU)IDC_BUTTON_R,
         NULL,
@@ -447,19 +432,23 @@ INT_PTR CALLBACK Page2Proc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam
     case WM_COMMAND:
         if (LOWORD(wParam) == IDC_BUTTON_D) 
         {
-            MessageBox(hwndDlg, L"Button on Page 2 clicked!", L"Info", MB_OK);
+            WCHAR baseDeviceID[256]; 
+            ExtractBaseDeviceID(usbDeviceProfile[selectedIndex].DeviceID, baseDeviceID, sizeof(baseDeviceID) / sizeof(WCHAR));
+            RemoveDriver(baseDeviceID);
+
         }
         else if (LOWORD(wParam) == IDC_BUTTON_R)
         {
-
+            WCHAR baseDeviceID[256];
+            ExtractBaseDeviceID(usbDeviceProfile[selectedIndex].DeviceID, baseDeviceID, sizeof(baseDeviceID) / sizeof(WCHAR));
+            RollbackDriver(baseDeviceID);
         }
         else if (LOWORD(wParam) == IDC_BUTTON_U)
         {
             WCHAR* path = ShowDriverSelectionDialog(hwndDlg, usbDeviceProfile[selectedIndex].DeviceID);
-            WCHAR baseDeviceID[256]; // Буфер для хранения основного Device ID
+            WCHAR baseDeviceID[256];
 
             ExtractBaseDeviceID(usbDeviceProfile[selectedIndex].DeviceID, baseDeviceID, sizeof(baseDeviceID) / sizeof(WCHAR));
-
             InstallDriver(baseDeviceID, path);
 
         }
