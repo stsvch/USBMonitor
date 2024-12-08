@@ -11,12 +11,12 @@
 BOOL CreateDirectoryIfNotExists(const WCHAR* directoryPath);
 
 // Сохраняет информацию о драйверах (DeviceID, путь к INF-файлу, версию и дату обновления) в текстовый файл
-void SaveDriverHistory(const WCHAR* deviceID, const WCHAR* infPath, const WCHAR* driverVersion);
+void SaveDriverHistory(const WCHAR* deviceID, const WCHAR* infPath);
 
 // Загружает историю драйверов по DeviceID и возвращает путь к INF-файлу
 BOOL LoadDriverHistory(const WCHAR* deviceID, WCHAR* infPath, size_t infPathSize);
 
-// Создаёт копию INF-файла драйвера в указанную директорию резервного копирования
-void BackupDriverINF(const WCHAR* infPath, const WCHAR* backupDirectory);
-
 void EscapeBackslashes(WCHAR* str);
+void ExtractBaseDeviceID(const WCHAR* fullDeviceID, WCHAR* baseDeviceID, size_t bufferSize);
+
+void DeleteLastDriverHistory(const WCHAR* deviceID);

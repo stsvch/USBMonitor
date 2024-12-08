@@ -207,7 +207,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         hPages[0] = CreateDialog(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_DIALOG1), hTabControl, Page1Proc);
         hPages[1] = CreateDialog(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_DIALOG2), hTabControl, Page2Proc);
 
-        for (int i = 0; i < 2; ++i) {
+        for (int i = 0; i < 2; ++i) 
+        {
             SetWindowLongPtr(hPages[i], GWL_STYLE, GetWindowLongPtr(hPages[i], GWL_STYLE) & ~WS_BORDER & ~WS_CAPTION);
             SetWindowPos(hPages[i], NULL, 5, 25, 440, 370, SWP_NOZORDER);
         }
@@ -455,7 +456,12 @@ INT_PTR CALLBACK Page2Proc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam
         else if (LOWORD(wParam) == IDC_BUTTON_U)
         {
             WCHAR* path = ShowDriverSelectionDialog(hwndDlg, usbDeviceProfile[selectedIndex].DeviceID);
-            int a = 1;
+            WCHAR baseDeviceID[256]; // Буфер для хранения основного Device ID
+
+            ExtractBaseDeviceID(usbDeviceProfile[selectedIndex].DeviceID, baseDeviceID, sizeof(baseDeviceID) / sizeof(WCHAR));
+
+            InstallDriver(baseDeviceID, path);
+
         }
         return TRUE;
     }

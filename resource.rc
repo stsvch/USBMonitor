@@ -25,7 +25,10 @@ STYLE DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Выбор драйвера"
 FONT 8, "MS Shell Dlg"
 BEGIN
-CONTROL         "", IDC_LISTBOX, "ListBox", LBS_STANDARD | WS_VSCROLL, 10, 10, 280, 200
+LTEXT           "Совместимые устройства", -1, 10, 5, 280, 8
+CONTROL         "", IDC_LISTBOX, "ListBox", LBS_STANDARD | WS_VSCROLL, 10, 20, 280, 200
 PUSHBUTTON      "Выбрать", IDOK, 60, 220, 50, 14
 PUSHBUTTON      "Отмена", IDCANCEL, 120, 220, 50, 14
+PUSHBUTTON      "Выбрать файл", IDC_BROWSE, 200, 220, 80, 14
 END
+

@@ -7,6 +7,7 @@
 #define IDC_BUTTON_U   4
 #define IDC_BUTTON_D   5
 #define IDC_BUTTON_R   6
+#define IDC_BROWSE   7
 
 #define IDD_DRIVER_SELECTION 103
 #define IDC_LISTBOX 1001

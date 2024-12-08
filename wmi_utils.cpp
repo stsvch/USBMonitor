@@ -410,3 +410,128 @@ void GetDiskPathFromDeviceID(IWbemServices* pSsvc, const WCHAR* deviceID) {
     // Освобождаем ресурсы
     SetupDiDestroyDeviceInfoList(deviceInfoSet);
  }
+
+void InstallDriverWithWMI(IWbemServices* pSvc, const WCHAR* deviceId, const WCHAR* infPath) {
+    HRESULT hres;
+    WCHAR query[512];
+    swprintf_s(query, sizeof(query) / sizeof(WCHAR), L"SELECT * FROM Win32_PnPEntity WHERE DeviceID='%s'", deviceId);
+
+    // Выполнение WQL-запроса
+    IEnumWbemClassObject* pEnumerator = NULL;
+    BSTR wqlQuery = SysAllocString(L"WQL");
+    BSTR queryStr = SysAllocString(query);
+
+    hres = pSvc->ExecQuery(
+        wqlQuery,
+        queryStr,
+        WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
+        NULL,
+        &pEnumerator);
+
+    SysFreeString(wqlQuery);
+    SysFreeString(queryStr);
+
+    if (FAILED(hres)) {
+        MessageBoxW(NULL, L"Ошибка выполнения WMI-запроса. Устройство не найдено.", L"Ошибка", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    IWbemClassObject* pclsObj = NULL;
+    ULONG uReturn = 0;
+
+    // Проверяем, найдено ли устройство
+    bool deviceFound = false;
+    while (pEnumerator) {
+        hres = pEnumerator->Next(WBEM_INFINITE, 1, &pclsObj, &uReturn);
+        if (uReturn == 0) {
+            break;
+        }
+        deviceFound = true;
+        VARIANT vtProp;
+
+        // Проверяем DeviceID
+        hres = pclsObj->Get(L"DeviceID", 0, &vtProp, 0, 0);
+        if (SUCCEEDED(hres)) {
+            MessageBoxW(NULL, L"Устройство найдено. Привязка драйвера...", L"Информация", MB_OK | MB_ICONINFORMATION);
+        }
+
+        VariantClear(&vtProp);
+        pclsObj->Release();
+    }
+
+    if (!deviceFound) {
+        MessageBoxW(NULL, L"Устройство с указанным DeviceID не найдено.", L"Ошибка", MB_OK | MB_ICONERROR);
+        pEnumerator->Release();
+        return;
+    }
+
+    // Пытаемся связать драйвер через WMI
+    IWbemClassObject* pClass = NULL;
+    IWbemClassObject* pInParamsDefinition = NULL;
+    IWbemClassObject* pOutParams = NULL;
+    IWbemClassObject* pInParams = NULL;
+
+    BSTR className = SysAllocString(L"Win32_PnPSignedDriver");
+    hres = pSvc->GetObject(className, 0, NULL, &pClass, NULL);
+    SysFreeString(className);
+
+    if (FAILED(hres)) {
+        MessageBoxW(NULL, L"Не удалось получить WMI-класс Win32_PnPSignedDriver.", L"Ошибка", MB_OK | MB_ICONERROR);
+        pEnumerator->Release();
+        return;
+    }
+
+    BSTR methodName = SysAllocString(L"AddDriver");
+    hres = pClass->GetMethod(methodName, 0, &pInParamsDefinition, NULL);
+    SysFreeString(methodName);
+
+    if (FAILED(hres)) {
+        MessageBoxW(NULL, L"Не удалось получить метод AddDriver.", L"Ошибка", MB_OK | MB_ICONERROR);
+        pClass->Release();
+        pEnumerator->Release();
+        return;
+    }
+
+    // Создаём параметры для метода AddDriver
+    hres = pInParamsDefinition->SpawnInstance(0, &pInParams);
+    if (FAILED(hres)) {
+        MessageBoxW(NULL, L"Не удалось создать параметры для метода AddDriver.", L"Ошибка", MB_OK | MB_ICONERROR);
+        pInParamsDefinition->Release();
+        pClass->Release();
+        pEnumerator->Release();
+        return;
+    }
+
+    // Заполняем параметры
+    VARIANT varINF;
+    varINF.vt = VT_BSTR;
+    varINF.bstrVal = SysAllocString(infPath);
+    hres = pInParams->Put(L"INFPath", 0, &varINF, 0);
+    VariantClear(&varINF);
+
+    if (FAILED(hres)) {
+        MessageBoxW(NULL, L"Ошибка заполнения параметров метода AddDriver.", L"Ошибка", MB_OK | MB_ICONERROR);
+        pInParams->Release();
+        pInParamsDefinition->Release();
+        pClass->Release();
+        pEnumerator->Release();
+        return;
+    }
+
+    // Выполняем метод AddDriver
+    hres = pSvc->ExecMethod(className, methodName, 0, NULL, pInParams, &pOutParams, NULL);
+
+    if (FAILED(hres)) {
+        MessageBoxW(NULL, L"Не удалось выполнить метод AddDriver.", L"Ошибка", MB_OK | MB_ICONERROR);
+    }
+    else {
+        MessageBoxW(NULL, L"Драйвер успешно установлен!", L"Информация", MB_OK | MB_ICONINFORMATION);
+    }
+
+    // Очистка ресурсов
+    if (pOutParams) pOutParams->Release();
+    if (pInParams) pInParams->Release();
+    if (pInParamsDefinition) pInParamsDefinition->Release();
+    pClass->Release();
+    pEnumerator->Release();
+}

@@ -17,3 +17,4 @@ Map* FullQueryDevices(IWbemServices* pSvc, const wchar_t* query, int* count);
 DeviceInfo* QueryDevices(IWbemServices* pSvc, const wchar_t* query, int* count);
 BOOL IsUsbDeviceConnected(IWbemServices* pSvc, const WCHAR* deviceID);
 void GetDiskPathFromDeviceID(IWbemServices* pSvc, const WCHAR* deviceID);
+void InstallDriverWithWMI(IWbemServices* pSvc, const WCHAR* deviceId, const WCHAR* infPath);
