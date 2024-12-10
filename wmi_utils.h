@@ -6,7 +6,10 @@
 #include <bthsdpdef.h>
 #include <sddl.h>
 #include "global.h"
+#include <vector>
+#include <strsafe.h>
 
+#pragma comment(lib, "comsuppw.lib")
 #pragma comment(lib, "SetupAPI.lib")
 #pragma comment(lib, "wbemuuid.lib")
 #pragma comment(lib, "comsupp.lib")

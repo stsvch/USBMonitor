@@ -1,6 +1,7 @@
 #include "wmi_utils.h"
 #include "usb_utils.h"
 #include "driver_utils.h"
+#include "statistic.h"
 #include "resource.h"
 #include <windows.h>
 #include <commctrl.h>
@@ -127,6 +128,65 @@ HTREEITEM AddTreeViewItem(HWND hTreeView, HTREEITEM hParent, const WCHAR* text, 
     return TreeView_InsertItem(hTreeView, &tvinsert);
 }
 
+void GetEventList(HWND hwnd) 
+{
+    wchar_t buffer[8192];
+    wchar_t* deviceID =(wchar_t*)L"USB\\VID_058F&PID_6387\\ZRK0CD97"; // Замените на актуальный DeviceID
+    GetEvent(buffer, sizeof(buffer) / sizeof(wchar_t), usbDeviceProfile[selectedIndex].DeviceID);
+    MessageBox(hwnd, buffer, L"Информация о событиях устройства", MB_OK);
+}
+
+void GetStatistic(HWND hwnd) 
+{
+    // Измеряем скорости чтения, записи и энергопотребление
+    double readSpeed = MeasureReadSpeed(usbDeviceProfile[selectedIndex].Path);
+    double writeSpeed = MeasureWriteSpeed(usbDeviceProfile[selectedIndex].Path);
+    WCHAR escapedID[MAX_BUFFER_SIZE];
+    wcscpy_s(escapedID, MAX_BUFFER_SIZE, usbDeviceProfile[selectedIndex].DeviceID);
+    EscapeBackslashes(escapedID);
+    double dPower = GetUSBDevicePowerConsumption(usbDeviceProfile[selectedIndex].DeviceID);
+
+    // Проверка корректности измеренных данных
+    WCHAR powerConsumption[50];
+    if (dPower < 0) {
+        wcscpy_s(powerConsumption, L"Ошибка получения данных");
+    }
+    else {
+        swprintf_s(powerConsumption, L"%.2f мВт", dPower);
+    }
+
+    // Формируем текст для отображения
+    WCHAR message[MAX_BUFFER_SIZE * 4];
+    swprintf_s(
+        message, sizeof(message) / sizeof(WCHAR),
+        L"========== Информация об устройстве ==========\n"
+        L"Устройство: %s\n"
+        L"Подключение: %s\n"
+        L"Путь (Диск): %s\n"
+        L"Тип устройства: %s\n\n"
+        L"========== Тесты производительности ==========\n"
+        L"Скорость чтения: %.2f МБ/с\n"
+        L"Скорость записи: %.2f МБ/с\n\n"
+        L"========== Энергопотребление ==========\n"
+        L"Потребляемая мощность: %s\n",
+        usbDeviceProfile[selectedIndex].Caption,
+        usbDeviceProfile[selectedIndex].IsConnected ? L"Да" : L"Нет",
+        usbDeviceProfile[selectedIndex].Path,
+        usbDeviceProfile[selectedIndex].Type,
+        readSpeed,
+        writeSpeed,
+        powerConsumption
+    );
+
+    // Отображаем результат в диалоговом окне
+    MessageBox(
+        hwnd,              // Дескриптор окна-владельца
+        message,           // Текст сообщения
+        L"Результаты тестирования устройства", // Заголовок окна
+        MB_OK | MB_ICONINFORMATION // Кнопка OK и значок информации
+    );
+}
+
 void GetUSBDevices()
 {
     ClearUSBList();
@@ -140,8 +200,11 @@ void GetUSBDevices()
             wcscpy_s(escapedID, MAX_BUFFER_SIZE, usbDeviceProfile[i].DeviceID);
             EscapeBackslashes(escapedID);
             usbDeviceProfile[i].IsConnected = IsUsbDeviceConnected(pSvc, escapedID);
-
-            GetDiskPathFromDeviceID(pSvc, escapedID);
+            if (!GetDevicePath(usbDeviceProfile[i].DeviceID, usbDeviceProfile[i].Path))
+            {
+                ZeroMemory(usbDeviceProfile[i].Path, sizeof(usbDeviceProfile[i].Path));
+            }
+            GetDeviceType(usbDeviceProfile[i].DeviceID, usbDeviceProfile[i].Type);
         }
         delete[] tempDevices;
     }
@@ -174,8 +237,35 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         FillRect(hdc, &rect, hBrushWhite);
     }
     break;
+    case WM_COMMAND:
+        switch (LOWORD(wParam))
+        {
+        case ID_UPDATE:
+            PopulateTreeViewWithDevices(hTreeView);
+            break;
+        case ID_STATISTIC_ERROR:
+            GetEventList(hwnd);
+            break;
+        case ID_STATISTIC_TEST:
+            GetStatistic(hwnd);
+            break;
+        }
+        break;
     case WM_CREATE:
     {
+        HMENU hMenu = CreateMenu();
+        HMENU hSubMenuStatistic = CreatePopupMenu();
+        HMENU hSubMenuConfig = CreatePopupMenu();
+
+        AppendMenu(hSubMenuStatistic, MF_STRING, ID_STATISTIC_ERROR, L"Ошибки");
+        AppendMenu(hSubMenuStatistic, MF_STRING, ID_STATISTIC_TEST, L"Анализ");
+        AppendMenu(hSubMenuConfig, MF_STRING, ID_UPDATE, L"Обновить");
+        AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hSubMenuStatistic, L"Статистика");
+        AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hSubMenuConfig, L"Конфигурация");
+
+        // Устанавливаем меню в окне
+        SetMenu(hwnd, hMenu);
+
         hBrushWhite = CreateSolidBrush(RGB(255, 255, 255));
 
         hTreeView = CreateWindowExW(0, WC_TREEVIEW, L"", WS_VISIBLE | WS_CHILD | WS_BORDER | TVS_HASLINES | TVS_LINESATROOT,

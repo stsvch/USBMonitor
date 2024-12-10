@@ -9,6 +9,10 @@
 #define IDC_BUTTON_R   6
 #define IDC_BROWSE   7
 
+#define ID_UPDATE 8
+#define ID_STATISTIC_ERROR 9
+#define ID_STATISTIC_TEST 10
+
 #define IDD_DRIVER_SELECTION 103
 #define IDC_LISTBOX 1001
 #define IDOK 104

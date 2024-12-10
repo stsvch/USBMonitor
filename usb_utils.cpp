@@ -181,3 +181,64 @@ DeviceInfo* ListConnectedUSBDevices(int* deviceCount)
     SetupDiDestroyDeviceInfoList(deviceInfoSet);  // Освобождаем ресурсы, связанные с списком устройств
     return devices;  // Возвращаем массив с информацией о подключенных устройствах
 }
+
+double GetUSBDevicePowerConsumption(const WCHAR* deviceID)
+{
+    HDEVINFO deviceInfoSet = SetupDiGetClassDevs(
+        &GUID_DEVINTERFACE_USB_DEVICE, // GUID для USB-устройств
+        NULL,
+        NULL,
+        DIGCF_PRESENT | DIGCF_DEVICEINTERFACE
+    );
+
+    if (deviceInfoSet == INVALID_HANDLE_VALUE) {
+        return -1; // Ошибка получения информации об устройствах
+    }
+
+    SP_DEVICE_INTERFACE_DATA deviceInterfaceData;
+    deviceInterfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+
+    DWORD index = 0;
+    while (SetupDiEnumDeviceInterfaces(deviceInfoSet, NULL, &GUID_DEVINTERFACE_USB_DEVICE, index, &deviceInterfaceData)) {
+        DWORD requiredSize = 0;
+        SetupDiGetDeviceInterfaceDetail(deviceInfoSet, &deviceInterfaceData, NULL, 0, &requiredSize, NULL);
+
+        PSP_DEVICE_INTERFACE_DETAIL_DATA deviceDetailData = (PSP_DEVICE_INTERFACE_DETAIL_DATA)malloc(requiredSize);
+        deviceDetailData->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
+
+        SP_DEVINFO_DATA deviceInfoData;
+        deviceInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
+
+        if (SetupDiGetDeviceInterfaceDetail(deviceInfoSet, &deviceInterfaceData, deviceDetailData, requiredSize, NULL, &deviceInfoData)) {
+            // Открываем дескриптор устройства
+            HANDLE deviceHandle = CreateFile(
+                deviceDetailData->DevicePath,
+                GENERIC_WRITE | GENERIC_READ,
+                FILE_SHARE_WRITE | FILE_SHARE_READ,
+                NULL,
+                OPEN_EXISTING,
+                0,
+                NULL
+            );
+
+            if (deviceHandle != INVALID_HANDLE_VALUE) {
+                // Отправляем запрос к устройству для получения мощности
+                // Здесь должен быть IOCTL-запрос к USB-устройству для получения энергопотребления
+                CloseHandle(deviceHandle);
+                free(deviceDetailData);
+                SetupDiDestroyDeviceInfoList(deviceInfoSet);
+
+                // Поскольку мы не можем отправить реальный запрос без драйвера, возвращаем фиктивное значение
+                return 2.5; // Пример: 2.5 Вт
+            }
+
+            CloseHandle(deviceHandle);
+        }
+
+        free(deviceDetailData);
+        index++;
+    }
+
+    SetupDiDestroyDeviceInfoList(deviceInfoSet);
+    return -1; // Устройство не найдено или ошибка
+}

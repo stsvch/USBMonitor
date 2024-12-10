@@ -12,6 +12,8 @@ struct DeviceInfo
     WCHAR Status[MAX_BUFFER_SIZE];
     WCHAR Caption[MAX_BUFFER_SIZE];
     BOOL IsConnected;
+    WCHAR Path[MAX_BUFFER_SIZE];
+    WCHAR Type[MAX_BUFFER_SIZE];
 };
 
 struct Map
