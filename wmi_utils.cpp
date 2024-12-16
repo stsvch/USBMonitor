@@ -109,17 +109,16 @@ Map* FullQueryDevices(IWbemServices* pSvc, const wchar_t* query, int* count)
             hres = pclsObj->Get(propertyName, 0, &vtProp, 0, 0);
             if (SUCCEEDED(hres))
             {
-                // Если достигнут предел размера массива, увеличиваем его
                 if (*count == capacity)
                 {
-                    capacity *= 2; // Увеличиваем емкость массива в два раза
+                    capacity *= 2; 
                     Map* newResults = new Map[capacity];
-                    // Копируем старые результаты в новый массив
-                    for (size_t j = 0; j < *count; ++j) {
+                    for (size_t j = 0; j < *count; j++) 
+                    {
                         newResults[j] = results[j];
                     }
-                    delete[] results; // Освобождаем старый массив
-                    results = newResults; // Обновляем указатель на новый массив
+                    delete[] results; 
+                    results = newResults; 
                 }
 
                 // Сохраняем имя свойства в результатах
@@ -128,21 +127,20 @@ Map* FullQueryDevices(IWbemServices* pSvc, const wchar_t* query, int* count)
                 // Обрабатываем значения различных типов
                 switch (vtProp.vt)
                 {
-                case VT_BSTR: // Строки
+                case VT_BSTR:
                     wcsncpy_s(results[*count].Value, vtProp.bstrVal ? vtProp.bstrVal : L"(null)", MAX_BUFFER_SIZE - 1);
                     break;
-                case VT_I4: // Целые числа (int)
+                case VT_I4: 
                     swprintf_s(results[*count].Value, MAX_BUFFER_SIZE, L"%d", vtProp.lVal);
                     break;
-                case VT_UI4: // Беззнаковые целые числа (unsigned int)
+                case VT_UI4: 
                     swprintf_s(results[*count].Value, MAX_BUFFER_SIZE, L"%u", vtProp.ulVal);
                     break;
-                case VT_BOOL: // Логические значения (True/False)
+                case VT_BOOL:
                     wcsncpy_s(results[*count].Value, vtProp.boolVal ? L"True" : L"False", MAX_BUFFER_SIZE - 1);
                     break;
-                case VT_DATE: // Дата
+                case VT_DATE: 
                     SYSTEMTIME st;
-                    // Преобразуем дату в формат времени
                     if (VariantTimeToSystemTime(vtProp.date, &st))
                     {
                         swprintf_s(results[*count].Value, MAX_BUFFER_SIZE, L"%02d/%02d/%04d %02d:%02d:%02d",
@@ -160,141 +158,18 @@ Map* FullQueryDevices(IWbemServices* pSvc, const wchar_t* query, int* count)
                     wcsncpy_s(results[*count].Value, L"(unknown type)", MAX_BUFFER_SIZE - 1);
                     break;
                 }
-
-                // Увеличиваем счетчик результатов
                 ++(*count);
             }
-
-            // Очистка данных
             VariantClear(&vtProp);
             SysFreeString(propertyName);
         }
 
-        // Освобождаем массив имен свойств
         SafeArrayDestroy(pNames);
-        pclsObj->Release(); // Освобождаем объект WMI
+        pclsObj->Release(); 
     }
-
-    // Освобождаем перечислитель
     pEnumerator->Release();
-    return results; // Возвращаем массив результатов
+    return results;
 }
-
-
-DeviceInfo* QueryDevices(IWbemServices* pSvc, const wchar_t* query, int* count)
-{
-    HRESULT hres;
-
-    IEnumWbemClassObject* pEnumerator = NULL;
-
-    // Выполнение WMI-запроса с использованием WQL (WMI Query Language)
-    hres = pSvc->ExecQuery(
-        bstr_t(L"WQL"),      // Используем WQL для запроса
-        bstr_t(query),       // Запрос, переданный в функцию
-        WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, // Флаги для выполнения запроса
-        NULL, &pEnumerator); // Указатель на перечислитель результатов
-
-    if (FAILED(hres))
-    {
-        *count = 0;
-        return NULL; // Возвращаем NULL, если запрос не удался
-    }
-
-    IWbemClassObject* pclsObj = NULL;
-    ULONG uReturn = 0;
-
-    size_t capacity = 20; // Начальный размер массива для хранения результатов
-    *count = 0;  // Инициализация счетчика результатов
-    DeviceInfo* devices = new DeviceInfo[capacity]; // Выделение памяти для массива результатов
-
-    // Основной цикл обработки объектов, возвращаемых запросом
-    while (true)
-    {
-        // Получаем следующий объект из перечислителя
-        hres = pEnumerator->Next(WBEM_INFINITE, 1, &pclsObj, &uReturn);
-        if (FAILED(hres)) break;  // Прерываем, если произошла ошибка
-        if (uReturn == 0) break;  // Прерываем, если нет объектов для обработки
-
-        // Если емкость массива исчерпана, увеличиваем ее
-        if (*count == capacity)
-        {
-            capacity *= 2; // Удваиваем размер массива
-            DeviceInfo* newDevices = new DeviceInfo[capacity];  // Выделяем новый массив
-            // Копируем старые устройства в новый массив
-            for (size_t i = 0; i < *count; ++i)
-            {
-                newDevices[i] = devices[i];
-            }
-            delete[] devices;  // Освобождаем старый массив
-            devices = newDevices; // Обновляем указатель на новый массив
-        }
-
-        VARIANT vtProp;
-        VariantInit(&vtProp); // Инициализация переменной для хранения значения свойства
-
-        DeviceInfo& device = devices[*count];  // Ссылка на текущий объект устройства
-
-        // Получаем значение свойства "DeviceID"
-        hres = pclsObj->Get(L"DeviceID", 0, &vtProp, 0, 0);
-        if (SUCCEEDED(hres) && vtProp.vt == VT_BSTR)
-        {
-            wcsncpy_s(device.DeviceID, vtProp.bstrVal, MAX_BUFFER_SIZE); // Копируем значение в структуру
-            device.DeviceID[MAX_BUFFER_SIZE - 1] = L'\0'; // Обеспечиваем корректное завершение строки
-        }
-        else
-        {
-            device.DeviceID[0] = L'\0'; // Если свойство не найдено, оставляем пустую строку
-        }
-        VariantClear(&vtProp); // Очищаем память, занятую переменной
-
-        // Получаем значение свойства "Description"
-        hres = pclsObj->Get(L"Description", 0, &vtProp, 0, 0);
-        if (SUCCEEDED(hres) && vtProp.vt == VT_BSTR)
-        {
-            wcsncpy_s(device.Description, vtProp.bstrVal, MAX_BUFFER_SIZE); // Копируем описание
-            device.Description[MAX_BUFFER_SIZE - 1] = L'\0'; // Обеспечиваем корректное завершение строки
-        }
-        else
-        {
-            device.Description[0] = L'\0'; // Если свойство не найдено, оставляем пустую строку
-        }
-        VariantClear(&vtProp); // Очищаем память, занятую переменной
-
-        // Получаем значение свойства "Status"
-        hres = pclsObj->Get(L"Status", 0, &vtProp, 0, 0);
-        if (SUCCEEDED(hres) && vtProp.vt == VT_BSTR)
-        {
-            wcsncpy_s(device.Status, vtProp.bstrVal, MAX_BUFFER_SIZE); // Копируем статус
-            device.Status[MAX_BUFFER_SIZE - 1] = L'\0'; // Обеспечиваем корректное завершение строки
-        }
-        else
-        {
-            device.Status[0] = L'\0'; // Если свойство не найдено, оставляем пустую строку
-        }
-        VariantClear(&vtProp); // Очищаем память, занятую переменной
-
-        // Получаем значение свойства "Caption"
-        hres = pclsObj->Get(L"Caption", 0, &vtProp, 0, 0);
-        if (SUCCEEDED(hres) && vtProp.vt == VT_BSTR)
-        {
-            wcsncpy_s(device.Caption, vtProp.bstrVal, MAX_BUFFER_SIZE); // Копируем подпись устройства
-            device.Caption[MAX_BUFFER_SIZE - 1] = L'\0'; // Обеспечиваем корректное завершение строки
-        }
-        else
-        {
-            device.Caption[0] = L'\0'; // Если свойство не найдено, оставляем пустую строку
-        }
-        VariantClear(&vtProp); // Очищаем память, занятую переменной
-
-        ++(*count); // Увеличиваем счетчик результатов
-
-        pclsObj->Release(); // Освобождаем объект
-    }
-
-    pEnumerator->Release(); // Освобождаем перечислитель
-    return devices; // Возвращаем массив устройств
-}
-
 
 BOOL IsUsbDeviceConnected(IWbemServices* pSvc, const WCHAR* deviceID)
 {

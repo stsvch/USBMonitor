@@ -129,6 +129,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="driver_utils.cpp" />
+    <ClCompile Include="event.cpp" />
     <ClCompile Include="history_util.cpp" />
     <ClCompile Include="history_util.h" />
     <ClCompile Include="main.cpp" />
@@ -147,6 +148,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="driver_utils.h" />
+    <ClInclude Include="event.h" />
     <ClInclude Include="global.h" />
     <ClInclude Include="statistic.h" />
     <ClInclude Include="usb_utils.h" />

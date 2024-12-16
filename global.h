@@ -3,7 +3,8 @@
 #define MAX_BUFFER_SIZE 256
 #define CONFIGFLAG_DISABLED 0x00000001
 #define CONFIGFLAG_FAILEDINSTALL 0x00000002
-#define BACKUPPATH  L"C:\\Backup";
+#define BACKUPPATH  L"C:\\Backup"
+#define BUFFER_SIZE 10*1024 * 1024
 
 struct DeviceInfo
 {

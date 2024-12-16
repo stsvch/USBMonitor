@@ -17,5 +17,4 @@
 
 HRESULT InitWMI(IWbemLocator** pLoc, IWbemServices** pSvc);
 Map* FullQueryDevices(IWbemServices* pSvc, const wchar_t* query, int* count);
-DeviceInfo* QueryDevices(IWbemServices* pSvc, const wchar_t* query, int* count);
 BOOL IsUsbDeviceConnected(IWbemServices* pSvc, const WCHAR* deviceID);

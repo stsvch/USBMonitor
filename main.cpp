@@ -1,6 +1,7 @@
 #include "wmi_utils.h"
 #include "usb_utils.h"
 #include "driver_utils.h"
+#include "event.h"
 #include "statistic.h"
 #include "resource.h"
 #include <windows.h>
@@ -8,18 +9,163 @@
 
 #pragma comment(lib, "comctl32.lib")
 
-INT_PTR CALLBACK Page1Proc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
-INT_PTR CALLBACK Page2Proc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
-
+WCHAR globalEventBuffer[BUFFER_SIZE] = { 0 };
+HBRUSH hBrushWhite;
 HTREEITEM selectedItem = NULL;
 DeviceInfo usbDeviceProfile[256];
 int usbDeviceProfileCount = 0;
 IWbemLocator* pLoc = NULL;
 IWbemServices* pSvc = NULL;
 int selectedIndex = -2;
-
 HWND hPages[2];
 HWND hTabControl;
+
+void CreatePageDeviceControls(HWND hwndDlg)
+{
+    CreateWindowExW(
+        0,
+        WC_EDIT,
+        L"",
+        WS_VISIBLE | WS_CHILD | WS_BORDER | ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_HSCROLL,
+        10,
+        10,
+        420,
+        300,
+        hwndDlg,
+        (HMENU)IDC_INFOTEXT,
+        NULL,
+        NULL
+    );
+
+    CreateWindowExW(
+        0,
+        WC_BUTTON,
+        L"",
+        WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
+        10,
+        320,
+        100,
+        30,
+        hwndDlg,
+        (HMENU)IDC_BUTTON_S,
+        NULL,
+        NULL
+    );
+}
+
+void CreatePageDriveerControls(HWND hwndDlg)
+{
+    CreateWindowExW(
+        0,
+        WC_EDIT,
+        L"",
+        WS_VISIBLE | WS_CHILD | WS_BORDER | ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_HSCROLL,
+        10,
+        10,
+        420,
+        300,
+        hwndDlg,
+        (HMENU)IDC_INFOTEXT,
+        NULL,
+        NULL
+    );
+
+    CreateWindowExW(
+        0,
+        WC_BUTTON,
+        L"Обновить",
+        WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
+        10,
+        320,
+        100,
+        30,
+        hwndDlg,
+        (HMENU)IDC_BUTTON_U,
+        NULL,
+        NULL
+    );
+
+    CreateWindowExW(
+        0,
+        WC_BUTTON,
+        L"Отключить",
+        WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
+        120,
+        320,
+        100,
+        30,
+        hwndDlg,
+        (HMENU)IDC_BUTTON_D,
+        NULL,
+        NULL
+    );
+
+    CreateWindowExW(
+        0,
+        WC_BUTTON,
+        L"Откатить",
+        WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
+        230,
+        320,
+        100,
+        30,
+        hwndDlg,
+        (HMENU)IDC_BUTTON_R,
+        NULL,
+        NULL
+    );
+}
+
+INT_PTR CALLBACK Page1Proc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    switch (uMsg)
+    {
+    case WM_INITDIALOG:
+        CreatePageDeviceControls(hwndDlg);
+        return TRUE;
+    case WM_COMMAND:
+        if (LOWORD(wParam) == IDC_BUTTON_S)
+        {
+            ChangeUSBDeviceState(usbDeviceProfile[selectedIndex].DeviceID, usbDeviceProfile[selectedIndex].IsConnected);
+        }
+        return TRUE;
+    }
+    return FALSE;
+}
+
+INT_PTR CALLBACK Page2Proc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    switch (uMsg)
+    {
+    case WM_INITDIALOG:
+        CreatePageDriveerControls(hwndDlg);
+        return TRUE;
+    case WM_COMMAND:
+        if (LOWORD(wParam) == IDC_BUTTON_D)
+        {
+            WCHAR baseDeviceID[256];
+            ExtractBaseDeviceID(usbDeviceProfile[selectedIndex].DeviceID, baseDeviceID, sizeof(baseDeviceID) / sizeof(WCHAR));
+            RemoveDriver(baseDeviceID);
+        }
+        else if (LOWORD(wParam) == IDC_BUTTON_R)
+        {
+            WCHAR baseDeviceID[256];
+            ExtractBaseDeviceID(usbDeviceProfile[selectedIndex].DeviceID, baseDeviceID, sizeof(baseDeviceID) / sizeof(WCHAR));
+            RollbackDriver(baseDeviceID);
+        }
+        else if (LOWORD(wParam) == IDC_BUTTON_U)
+        {
+            WCHAR* path = ShowDriverSelectionDialog(hwndDlg, usbDeviceProfile[selectedIndex].DeviceID);
+            WCHAR baseDeviceID[256];
+
+            ExtractBaseDeviceID(usbDeviceProfile[selectedIndex].DeviceID, baseDeviceID, sizeof(baseDeviceID) / sizeof(WCHAR));
+            InstallDriver(baseDeviceID, path);
+
+        }
+        return TRUE;
+    }
+    return FALSE;
+}
 
 void ClearUSBList()
 {
@@ -128,34 +274,116 @@ HTREEITEM AddTreeViewItem(HWND hTreeView, HTREEITEM hParent, const WCHAR* text, 
     return TreeView_InsertItem(hTreeView, &tvinsert);
 }
 
-void GetEventList(HWND hwnd) 
+LRESULT CALLBACK ModalProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    static HWND hListView;
+    static std::vector<EventData>* pEvents;
+    switch (uMsg)
+    {
+    case WM_CREATE:
+    {
+        CREATESTRUCT* pCreate = (CREATESTRUCT*)lParam;
+        pEvents = (std::vector<EventData>*)pCreate->lpCreateParams;
+
+        hListView = CreateWindowEx(
+            0, WC_LISTVIEW, NULL,
+            WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL,
+            10, 10, 780, 460,
+            hwnd, (HMENU)1, GetModuleHandle(NULL), NULL);
+
+        LVCOLUMN lvc = {};
+        lvc.mask = LVCF_TEXT | LVCF_WIDTH;
+
+        std::vector<std::wstring> columns =
+        {
+            L"EventID", L"TimeCreated", L"Level", L"Provider Name",
+            L"ProcessID", L"ThreadID", L"Channel", L"Task", L"Keywords", L"Data"
+        };
+
+        int columnWidths[] = { 80, 150, 60, 150, 80, 80, 100, 80, 150, 250 };
+
+        for (size_t i = 0; i < columns.size(); i++) {
+            lvc.pszText = (LPWSTR)columns[i].c_str();
+            lvc.cx = columnWidths[i];
+            ListView_InsertColumn(hListView, (int)i, &lvc);
+        }
+
+        for (size_t i = 0; i < pEvents->size(); i++) 
+        {
+            const EventData& event = (*pEvents)[i];
+
+            LVITEM lvi = {};
+            lvi.mask = LVIF_TEXT;
+            lvi.iItem = (int)i;
+
+            lvi.pszText = (LPWSTR)event.eventID.c_str();
+            lvi.iSubItem = 0;
+            ListView_InsertItem(hListView, &lvi);
+
+            ListView_SetItemText(hListView, (int)i, 1, (LPWSTR)event.timeCreated.c_str());
+            ListView_SetItemText(hListView, (int)i, 2, (LPWSTR)event.level.c_str());
+            ListView_SetItemText(hListView, (int)i, 3, (LPWSTR)event.providerName.c_str());
+            ListView_SetItemText(hListView, (int)i, 4, (LPWSTR)event.processID.c_str());
+            ListView_SetItemText(hListView, (int)i, 5, (LPWSTR)event.threadID.c_str());
+            ListView_SetItemText(hListView, (int)i, 6, (LPWSTR)event.channel.c_str());
+            ListView_SetItemText(hListView, (int)i, 7, (LPWSTR)event.task.c_str());
+            ListView_SetItemText(hListView, (int)i, 8, (LPWSTR)event.keywords.c_str());
+            ListView_SetItemText(hListView, (int)i, 9, (LPWSTR)event.data.c_str());
+        }
+        break;
+    }
+
+    case WM_CLOSE:
+        DestroyWindow(hwnd);
+        break;
+
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        break;
+
+    default:
+        return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    }
+    return 0;
+}
+
+void ShowModalWindow(HINSTANCE hInstance, HWND hwndParent, const std::vector<EventData>& events) 
 {
-    wchar_t buffer[8192];
-    wchar_t* deviceID =(wchar_t*)L"USB\\VID_058F&PID_6387\\ZRK0CD97"; // Замените на актуальный DeviceID
-    GetEvent(buffer, sizeof(buffer) / sizeof(wchar_t), usbDeviceProfile[selectedIndex].DeviceID);
-    MessageBox(hwnd, buffer, L"Информация о событиях устройства", MB_OK);
+    WNDCLASS wc = {};
+    wc.lpfnWndProc = ModalProc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = L"EventViewer";
+
+    RegisterClass(&wc);
+
+    HWND hwnd = CreateWindowEx(
+        0, L"EventViewer", L"События устройства",
+        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+        CW_USEDEFAULT, CW_USEDEFAULT, 800, 500,
+        hwndParent, NULL, hInstance, (LPVOID)&events);
+
+    MSG msg = {};
+    while (GetMessage(&msg, NULL, 0, 0)) 
+    {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+
+    UnregisterClass(L"EventViewer", hInstance);
+}
+
+void GetEventList(HWND hwnd)
+{
+    std::vector<EventData> events;
+    GetEvents(usbDeviceProfile[selectedIndex].DeviceID, events);
+    HINSTANCE hInstance = GetModuleHandle(NULL);
+    ShowModalWindow(hInstance, NULL, events);
 }
 
 void GetStatistic(HWND hwnd) 
 {
-    // Измеряем скорости чтения, записи и энергопотребление
     double readSpeed = MeasureReadSpeed(usbDeviceProfile[selectedIndex].Path);
     double writeSpeed = MeasureWriteSpeed(usbDeviceProfile[selectedIndex].Path);
-    WCHAR escapedID[MAX_BUFFER_SIZE];
-    wcscpy_s(escapedID, MAX_BUFFER_SIZE, usbDeviceProfile[selectedIndex].DeviceID);
-    EscapeBackslashes(escapedID);
-    double dPower = GetUSBDevicePowerConsumption(usbDeviceProfile[selectedIndex].DeviceID);
 
-    // Проверка корректности измеренных данных
-    WCHAR powerConsumption[50];
-    if (dPower < 0) {
-        wcscpy_s(powerConsumption, L"Ошибка получения данных");
-    }
-    else {
-        swprintf_s(powerConsumption, L"%.2f мВт", dPower);
-    }
-
-    // Формируем текст для отображения
     WCHAR message[MAX_BUFFER_SIZE * 4];
     swprintf_s(
         message, sizeof(message) / sizeof(WCHAR),
@@ -166,24 +394,20 @@ void GetStatistic(HWND hwnd)
         L"Тип устройства: %s\n\n"
         L"========== Тесты производительности ==========\n"
         L"Скорость чтения: %.2f МБ/с\n"
-        L"Скорость записи: %.2f МБ/с\n\n"
-        L"========== Энергопотребление ==========\n"
-        L"Потребляемая мощность: %s\n",
+        L"Скорость записи: %.2f МБ/с\n\n",
         usbDeviceProfile[selectedIndex].Caption,
         usbDeviceProfile[selectedIndex].IsConnected ? L"Да" : L"Нет",
         usbDeviceProfile[selectedIndex].Path,
         usbDeviceProfile[selectedIndex].Type,
         readSpeed,
-        writeSpeed,
-        powerConsumption
+        writeSpeed
     );
 
-    // Отображаем результат в диалоговом окне
     MessageBox(
-        hwnd,              // Дескриптор окна-владельца
-        message,           // Текст сообщения
-        L"Результаты тестирования устройства", // Заголовок окна
-        MB_OK | MB_ICONINFORMATION // Кнопка OK и значок информации
+        hwnd,            
+        message,          
+        L"Результаты тестирования устройства", 
+        MB_OK | MB_ICONINFORMATION 
     );
 }
 
@@ -193,7 +417,7 @@ void GetUSBDevices()
     DeviceInfo* tempDevices = ListConnectedUSBDevices(&usbDeviceProfileCount);
     if (tempDevices != nullptr)
     {
-        for (size_t i = 0; i < usbDeviceProfileCount && i < 256; ++i)
+        for (size_t i = 0; i < usbDeviceProfileCount && i < 256; i++)
         {
             usbDeviceProfile[i] = tempDevices[i];
             WCHAR escapedID[MAX_BUFFER_SIZE];
@@ -221,10 +445,25 @@ void PopulateTreeViewWithDevices(HWND hTreeView)
     }
 }
 
+bool GetDeviceInstanceID(LPARAM lParam, wchar_t* outputBuffer, size_t bufferSize)
+{
+    DEV_BROADCAST_HDR* pHdr = (DEV_BROADCAST_HDR*)lParam;
+    DEV_BROADCAST_DEVICEINTERFACE* pDev = (DEV_BROADCAST_DEVICEINTERFACE*)pHdr;
+    if (wcslen(pDev->dbcc_name) < bufferSize)
+    {
+        wcsncpy_s(outputBuffer, bufferSize, pDev->dbcc_name, _TRUNCATE);
+        return true;
+    }
+    else
+    {
+        wprintf(L"Буфер недостаточного размера\n");
+        return false;
+    }
+}
+
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     static HWND hTreeView;
-    static HBRUSH hBrushWhite;
     static HIMAGELIST hImageList;
 
     switch (uMsg)
@@ -257,13 +496,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         HMENU hSubMenuStatistic = CreatePopupMenu();
         HMENU hSubMenuConfig = CreatePopupMenu();
 
-        AppendMenu(hSubMenuStatistic, MF_STRING, ID_STATISTIC_ERROR, L"Ошибки");
+        AppendMenu(hSubMenuStatistic, MF_STRING, ID_STATISTIC_ERROR, L"События");
         AppendMenu(hSubMenuStatistic, MF_STRING, ID_STATISTIC_TEST, L"Анализ");
-        AppendMenu(hSubMenuConfig, MF_STRING, ID_UPDATE, L"Обновить");
         AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hSubMenuStatistic, L"Статистика");
-        AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hSubMenuConfig, L"Конфигурация");
+        AppendMenu(hMenu, MF_STRING, ID_UPDATE, L"Обновить");
 
-        // Устанавливаем меню в окне
         SetMenu(hwnd, hMenu);
 
         hBrushWhite = CreateSolidBrush(RGB(255, 255, 255));
@@ -322,7 +559,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         else if (((LPNMHDR)lParam)->hwndFrom == hTreeView)
         {
             LPNMTREEVIEW pnmTreeView = (LPNMTREEVIEW)lParam;
-            if (pnmTreeView->hdr.code == NM_DBLCLK) {
+            if (pnmTreeView->hdr.code == NM_DBLCLK) 
+            {
                 TVITEM item;
                 item.mask = TVIF_PARAM | TVIF_HANDLE;
                 item.hItem = TreeView_GetSelection(hTreeView);
@@ -377,14 +615,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     WNDCLASS wc = { 0 };
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = hInstance;
-    wc.lpszClassName = L"DeviceInfoApp";
+    wc.lpszClassName = L"usb";
     wc.hIcon = (HICON)LoadImage(NULL, L"m.ico", IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
     RegisterClass(&wc);
 
     HRESULT hres;
     hres = InitWMI(&pLoc, &pSvc);
 
-    HWND hwnd = CreateWindowExW(0, L"DeviceInfoApp", L"Device Information", WS_OVERLAPPEDWINDOW,
+    HWND hwnd = CreateWindowExW(0, L"usb", L"Usb монитор", WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT, 800, 450, NULL, NULL, hInstance, NULL);
     ShowWindow(hwnd, nShowCmd);
 
@@ -397,152 +635,4 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
     CoUninitialize();
     return 0;
-}
-
-void CreatePageDeviceControls(HWND hwndDlg) 
-{
-    CreateWindowExW(
-        0,
-        WC_EDIT,
-        L"",
-        WS_VISIBLE | WS_CHILD | WS_BORDER | ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_HSCROLL,
-        10,       
-        10,        
-        420,       
-        300,        
-        hwndDlg,
-        (HMENU)IDC_INFOTEXT,
-        NULL,
-        NULL
-    );
-
-    CreateWindowExW(
-        0,
-        WC_BUTTON,
-        L"",
-        WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-        10,        
-        320,      
-        100,        
-        30,        
-        hwndDlg,
-        (HMENU)IDC_BUTTON_S,
-        NULL,
-        NULL
-    );
-}
-
-void CreatePageDriveerControls(HWND hwndDlg) 
-{
-    CreateWindowExW(
-        0,
-        WC_EDIT,
-        L"",
-        WS_VISIBLE | WS_CHILD | WS_BORDER | ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_HSCROLL,
-        10,        
-        10,    
-        420,       
-        300,        
-        hwndDlg,
-        (HMENU)IDC_INFOTEXT,
-        NULL,
-        NULL
-    );
-
-    CreateWindowExW(
-        0,
-        WC_BUTTON,
-        L"Обновить",
-        WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-        10,        
-        320,        
-        100,      
-        30,          
-        hwndDlg,
-        (HMENU)IDC_BUTTON_U,
-        NULL,
-        NULL
-    );
-
-    CreateWindowExW(
-        0,
-        WC_BUTTON,
-        L"Отключить",
-        WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-        120,        
-        320,        
-        100,       
-        30,         
-        hwndDlg,
-        (HMENU)IDC_BUTTON_D,
-        NULL,
-        NULL
-    );
-
-    CreateWindowExW(
-        0,
-        WC_BUTTON,
-        L"Откатить",
-        WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-        230,         
-        320,        
-        100,      
-        30,        
-        hwndDlg,
-        (HMENU)IDC_BUTTON_R,
-        NULL,
-        NULL
-    );
-}
-
-INT_PTR CALLBACK Page1Proc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
-{
-    switch (uMsg) 
-    {
-    case WM_INITDIALOG:
-        CreatePageDeviceControls(hwndDlg); 
-        return TRUE;
-    case WM_COMMAND:
-        if (LOWORD(wParam) == IDC_BUTTON_S) 
-        {
-            ChangeUSBDeviceState(usbDeviceProfile[selectedIndex].DeviceID, usbDeviceProfile[selectedIndex].IsConnected);
-        }
-        return TRUE;
-    }
-    return FALSE;
-}
-
-INT_PTR CALLBACK Page2Proc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
-{
-    switch (uMsg) 
-    {
-    case WM_INITDIALOG:
-        CreatePageDriveerControls(hwndDlg);
-        return TRUE;
-    case WM_COMMAND:
-        if (LOWORD(wParam) == IDC_BUTTON_D) 
-        {
-            WCHAR baseDeviceID[256]; 
-            ExtractBaseDeviceID(usbDeviceProfile[selectedIndex].DeviceID, baseDeviceID, sizeof(baseDeviceID) / sizeof(WCHAR));
-            RemoveDriver(baseDeviceID);
-
-        }
-        else if (LOWORD(wParam) == IDC_BUTTON_R)
-        {
-            WCHAR baseDeviceID[256];
-            ExtractBaseDeviceID(usbDeviceProfile[selectedIndex].DeviceID, baseDeviceID, sizeof(baseDeviceID) / sizeof(WCHAR));
-            RollbackDriver(baseDeviceID);
-        }
-        else if (LOWORD(wParam) == IDC_BUTTON_U)
-        {
-            WCHAR* path = ShowDriverSelectionDialog(hwndDlg, usbDeviceProfile[selectedIndex].DeviceID);
-            WCHAR baseDeviceID[256];
-
-            ExtractBaseDeviceID(usbDeviceProfile[selectedIndex].DeviceID, baseDeviceID, sizeof(baseDeviceID) / sizeof(WCHAR));
-            InstallDriver(baseDeviceID, path);
-
-        }
-        return TRUE;
-    }
-    return FALSE;
 }

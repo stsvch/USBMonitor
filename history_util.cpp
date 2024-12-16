@@ -19,9 +19,6 @@ BOOL CreateDirectoryIfNotExists(const WCHAR* directoryPath)
         }
         else
         {
-            WCHAR errorMsg[256];
-            swprintf_s(errorMsg, sizeof(errorMsg) / sizeof(WCHAR), L"Failed to create directory. Error: %lu", GetLastError());
-            MessageBoxW(NULL, errorMsg, L"Error", MB_OK | MB_ICONERROR);
             return FALSE; 
         }
     }
@@ -31,14 +28,9 @@ void SaveDriverHistory(const WCHAR* deviceID, const WCHAR* infPath)
 {
     FILE* file = NULL;
 
-    errno_t err = _wfopen_s(&file, L"driver_history.log", L"a"); 
+    errno_t err = _wfopen_s(&file, DCONFIG_FILE, L"a");
 
-    if (file == NULL) 
-    {
-        MessageBoxW(NULL, L"Failed to open history file for writing.", L"Error", MB_OK | MB_ICONERROR);
-        return;
-    }
-
+    if (file == NULL) return;
     time_t currentTime = time(NULL);
     if (currentTime != -1) 
     {
@@ -57,13 +49,9 @@ void SaveDriverHistory(const WCHAR* deviceID, const WCHAR* infPath)
 BOOL LoadDriverHistory(const WCHAR* deviceID, WCHAR* infPath, size_t infPathSize) 
 {
     FILE* file = NULL;
-    errno_t err = _wfopen_s(&file, L"driver_history.log", L"r"); 
+    errno_t err = _wfopen_s(&file, DCONFIG_FILE, L"r");
 
-    if (err != 0 || file == NULL)
-    {
-        MessageBoxW(NULL, L"Failed to open history file for reading.", L"Error", MB_OK | MB_ICONERROR);
-        return FALSE;
-    }
+    if (err != 0 || file == NULL) return FALSE;
 
     WCHAR line[512];
     WCHAR previousInfPath[512] = L"";
@@ -78,7 +66,6 @@ BOOL LoadDriverHistory(const WCHAR* deviceID, WCHAR* infPath, size_t infPathSize
             currentInfPath[0] = L'\0';
             found = FALSE; 
         }
-
         if (wcsstr(line, L"INF Path:")) 
         {
             swscanf_s(line, L"INF Path: %s\n", currentInfPath, (unsigned)sizeof(currentInfPath) / sizeof(WCHAR));
@@ -112,7 +99,8 @@ void EscapeBackslashes(WCHAR* str)
     }
 }
 
-void ExtractBaseDeviceID(const WCHAR* fullDeviceID, WCHAR* baseDeviceID, size_t bufferSize) {
+void ExtractBaseDeviceID(const WCHAR* fullDeviceID, WCHAR* baseDeviceID, size_t bufferSize) 
+{
     const WCHAR* firstSlash = wcschr(fullDeviceID, L'\\');
     if (firstSlash)
     {
@@ -140,80 +128,103 @@ void DeleteDriverHistory(const WCHAR* deviceID)
     FILE* file = NULL;
     FILE* tempFile = NULL;
 
-    errno_t err = _wfopen_s(&file, L"./driver_history.log", L"r");
-    _wfopen_s(&tempFile, L"./temp_driver_history.log", L"w");
+    _wfopen_s(&file, DCONFIG_FILE, L"r");
+    _wfopen_s(&tempFile, TDCONFIG_FILE, L"w");
 
-    if (file == NULL || tempFile == NULL) 
+    if (file == NULL || tempFile == NULL)
     {
-        MessageBoxW(NULL, L"Failed to process history file.", L"Error", MB_OK | MB_ICONERROR);
         return;
     }
 
     WCHAR line[512];
-    BOOL skip = FALSE;
+    BOOL isPartOfTargetRecord = FALSE;
+    int linesToSkip = 0; 
 
-    while (fgetws(line, sizeof(line) / sizeof(WCHAR), file)) 
+    // --- Читаем файл построчно ---
+    while (fgetws(line, sizeof(line) / sizeof(WCHAR), file))
     {
         if (wcsstr(line, L"DeviceID:"))
         {
-            skip = wcsstr(line, deviceID) != NULL;
+            // Если это строка с DeviceID, проверяем соответствие
+            if (wcsstr(line, deviceID) != NULL)
+            {
+                isPartOfTargetRecord = TRUE;
+                linesToSkip = 2; // Установить пропуск двух следующих строк
+                continue; // Пропускаем текущую строку с DeviceID
+            }
+            else
+            {
+                isPartOfTargetRecord = FALSE;
+            }
         }
 
-        if (!skip) 
+        if (isPartOfTargetRecord && linesToSkip > 0)
         {
-            fputws(line, tempFile);
+            // Пропускаем дополнительные строки, связанные с DeviceID
+            linesToSkip--;
+            continue;
         }
+        fputws(line, tempFile);
     }
 
     fclose(file);
     fclose(tempFile);
 
-    _wremove(L"./driver_history.log");
-    _wrename(L"./temp_driver_history.log", L"./driver_history.log");
+    // Заменяем исходный файл новым
+    _wremove(DCONFIG_FILE);
+    _wrename(TDCONFIG_FILE, DCONFIG_FILE);
 }
 
-void DeleteLastDriverHistory(const WCHAR* deviceID) 
+void DeleteLastDriverHistory(const WCHAR* deviceID)
 {
     FILE* file = NULL;
     FILE* tempFile = NULL;
 
-    errno_t err = _wfopen_s(&file, L"./driver_history.log", L"r");
-    _wfopen_s(&tempFile, L"./temp_driver_history.log", L"w");
+    _wfopen_s(&file, DCONFIG_FILE, L"r");
+    _wfopen_s(&tempFile, TDCONFIG_FILE, L"w");
 
     if (file == NULL || tempFile == NULL)
     {
-        MessageBoxW(NULL, L"Failed to process history file.", L"Error", MB_OK | MB_ICONERROR);
         return;
     }
 
     WCHAR line[512];
-    WCHAR lastRecord[3][512] = { L"", L"", L"" }; 
-    BOOL skip = FALSE;
-    BOOL isDeviceIDMatch = FALSE;
+    long lastRecordStart = -1; // Начало последней записи
+    long currentPos = 0;  
 
-    while (fgetws(line, sizeof(line) / sizeof(WCHAR), file)) 
+    while (fgetws(line, sizeof(line) / sizeof(WCHAR), file))
     {
-        if (wcsstr(line, L"DeviceID:"))
+        if (wcsstr(line, L"DeviceID:") && wcsstr(line, deviceID))
         {
-            isDeviceIDMatch = wcsstr(line, deviceID) != NULL;
+            lastRecordStart = currentPos; // Запоминаем начало записи
+        }
+        currentPos++;
+    }
 
-            if (isDeviceIDMatch) 
-            {
-                wcscpy_s(lastRecord[0], lastRecord[1]);
-                wcscpy_s(lastRecord[1], lastRecord[2]);
-                wcscpy_s(lastRecord[2], line);
-            }
+    rewind(file); 
+
+    currentPos = 0;
+    while (fgetws(line, sizeof(line) / sizeof(WCHAR), file))
+    {
+        // Пропускаем строки, относящиеся к последней записи
+        if (currentPos == lastRecordStart ||
+            currentPos == lastRecordStart + 1 ||
+            currentPos == lastRecordStart + 2)
+        {
+            currentPos++;
+            continue;
         }
 
-        if (!isDeviceIDMatch || (isDeviceIDMatch && wcscmp(line, lastRecord[2]) != 0))
-        {
-            fputws(line, tempFile); 
-        }
+        // Записываем все остальные строки
+        fputws(line, tempFile);
+        currentPos++;
     }
 
     fclose(file);
     fclose(tempFile);
 
-    _wremove(L"./driver_history.log");
-    _wrename(L"./temp_driver_history.log", L"./driver_history.log");
+    // Заменяем старый файл новым
+    _wremove(DCONFIG_FILE);
+    _wrename(TDCONFIG_FILE, DCONFIG_FILE);
 }
+

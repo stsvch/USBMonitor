@@ -55,9 +55,7 @@ BOOL ChangeUSBDeviceState(const WCHAR* deviceID, BOOL connected)
 
 DeviceInfo* ListConnectedUSBDevices(int* deviceCount)
 {
-    *deviceCount = 0;  // Инициализируем количество устройств
-
-    // Получаем список всех устройств, подключенных через USB
+    *deviceCount = 0;  
     HDEVINFO deviceInfoSet = SetupDiGetClassDevs(
         NULL,
         L"USB",  // Фильтруем устройства по классу "USB"
@@ -65,20 +63,16 @@ DeviceInfo* ListConnectedUSBDevices(int* deviceCount)
         DIGCF_PRESENT | DIGCF_ALLCLASSES  // Получаем только устройства, которые присутствуют в системе
     );
 
-    if (deviceInfoSet == INVALID_HANDLE_VALUE) {
-        return NULL;  // Если не удалось получить список устройств, возвращаем NULL
-    }
-
-    SP_DEVINFO_DATA deviceInfoData;
-    deviceInfoData.cbSize = sizeof(SP_DEVINFO_DATA);  // Инициализируем структуру данных для устройства
-
-    int capacity = 10;  // Начальная вместимость массива устройств
-    DeviceInfo* devices = new DeviceInfo[capacity];  // Создаем массив для хранения информации о устройствах
-
-    // Перебираем все устройства в списке
-    for (int i = 0; SetupDiEnumDeviceInfo(deviceInfoSet, i, &deviceInfoData); ++i)
+    if (deviceInfoSet == INVALID_HANDLE_VALUE) 
     {
-        // Инициализируем строки для хранения информации о текущем устройстве
+        return NULL;  
+    }
+    SP_DEVINFO_DATA deviceInfoData;
+    deviceInfoData.cbSize = sizeof(SP_DEVINFO_DATA);  
+    int capacity = 10; 
+    DeviceInfo* devices = new DeviceInfo[capacity];  
+    for (int i = 0; SetupDiEnumDeviceInfo(deviceInfoSet, i, &deviceInfoData); i++)
+    {
         WCHAR deviceDesc[MAX_BUFFER_SIZE] = L"Unknown Device";
         WCHAR deviceClass[MAX_BUFFER_SIZE] = L"Unknown Class";
         WCHAR deviceDriver[MAX_BUFFER_SIZE] = L"Unknown Driver";
@@ -119,21 +113,15 @@ DeviceInfo* ListConnectedUSBDevices(int* deviceCount)
             NULL))
         {
         }
-
-        // Фильтруем системные устройства (например, концентраторы и контроллеры)
         if (wcsstr(deviceDesc, L"Hub") != nullptr ||
             wcsstr(deviceDesc, L"Controller") != nullptr)
         {
             continue;  // Пропускаем устройства, связанные с хабами и контроллерами
         }
-
-        // Пропускаем устройства, которые не являются USB
         if (wcsstr(deviceClass, L"USB") == nullptr)
         {
             continue;  // Пропускаем устройства, не относящиеся к классу USB
         }
-
-        // Проверяем свойства устройства, чтобы определить, является ли оно съемным
         DWORD capabilities = 0;
         if (SetupDiGetDeviceRegistryProperty(
             deviceInfoSet,
@@ -144,101 +132,37 @@ DeviceInfo* ListConnectedUSBDevices(int* deviceCount)
             sizeof(capabilities),
             NULL))
         {
-            // Если устройство не является съемным, пропускаем его
-            if ((capabilities & CM_DEVCAP_REMOVABLE) == 0) {
+            if ((capabilities & CM_DEVCAP_REMOVABLE) == 0) 
+            {
                 continue;  // Пропускаем устройства, которые не являются съемными
             }
         }
 
-        // Получаем уникальный идентификатор устройства (Device ID)
         WCHAR deviceID[MAX_BUFFER_SIZE] = L"Unknown Device ID";
-        if (SetupDiGetDeviceInstanceId(
+        SetupDiGetDeviceInstanceId(
             deviceInfoSet,
             &deviceInfoData,
             deviceID,
             sizeof(deviceID),
-            NULL))
+            NULL);
+
+        if (*deviceCount >= capacity) 
         {
+            capacity *= 2; 
+            DeviceInfo* newDevices = new DeviceInfo[capacity]; 
+            memcpy(newDevices, devices, sizeof(DeviceInfo) * (*deviceCount)); 
+            delete[] devices; 
+            devices = newDevices; 
         }
 
-        // Если количество устройств превышает текущую вместимость массива, увеличиваем его
-        if (*deviceCount >= capacity) {
-            capacity *= 2;  // Удваиваем вместимость массива
-            DeviceInfo* newDevices = new DeviceInfo[capacity];  // Создаем новый массив с большей вместимостью
-            memcpy(newDevices, devices, sizeof(DeviceInfo) * (*deviceCount));  // Копируем старые данные в новый массив
-            delete[] devices;  // Освобождаем старый массив
-            devices = newDevices;  // Перенаправляем указатель на новый массив
-        }
-
-        // Сохраняем информацию о текущем устройстве в массив
         DeviceInfo& device = devices[*deviceCount];
-        wcscpy_s(device.Caption, deviceDesc);  // Копируем описание устройства
-        wcscpy_s(device.DeviceID, deviceID);  // Копируем ID устройства
+        wcscpy_s(device.Caption, deviceDesc);  
+        wcscpy_s(device.DeviceID, deviceID);  
 
-        ++(*deviceCount);  // Увеличиваем счетчик количества устройств
+        ++(*deviceCount); 
     }
 
-    SetupDiDestroyDeviceInfoList(deviceInfoSet);  // Освобождаем ресурсы, связанные с списком устройств
-    return devices;  // Возвращаем массив с информацией о подключенных устройствах
+    SetupDiDestroyDeviceInfoList(deviceInfoSet); 
+    return devices;  
 }
 
-double GetUSBDevicePowerConsumption(const WCHAR* deviceID)
-{
-    HDEVINFO deviceInfoSet = SetupDiGetClassDevs(
-        &GUID_DEVINTERFACE_USB_DEVICE, // GUID для USB-устройств
-        NULL,
-        NULL,
-        DIGCF_PRESENT | DIGCF_DEVICEINTERFACE
-    );
-
-    if (deviceInfoSet == INVALID_HANDLE_VALUE) {
-        return -1; // Ошибка получения информации об устройствах
-    }
-
-    SP_DEVICE_INTERFACE_DATA deviceInterfaceData;
-    deviceInterfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
-
-    DWORD index = 0;
-    while (SetupDiEnumDeviceInterfaces(deviceInfoSet, NULL, &GUID_DEVINTERFACE_USB_DEVICE, index, &deviceInterfaceData)) {
-        DWORD requiredSize = 0;
-        SetupDiGetDeviceInterfaceDetail(deviceInfoSet, &deviceInterfaceData, NULL, 0, &requiredSize, NULL);
-
-        PSP_DEVICE_INTERFACE_DETAIL_DATA deviceDetailData = (PSP_DEVICE_INTERFACE_DETAIL_DATA)malloc(requiredSize);
-        deviceDetailData->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
-
-        SP_DEVINFO_DATA deviceInfoData;
-        deviceInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
-
-        if (SetupDiGetDeviceInterfaceDetail(deviceInfoSet, &deviceInterfaceData, deviceDetailData, requiredSize, NULL, &deviceInfoData)) {
-            // Открываем дескриптор устройства
-            HANDLE deviceHandle = CreateFile(
-                deviceDetailData->DevicePath,
-                GENERIC_WRITE | GENERIC_READ,
-                FILE_SHARE_WRITE | FILE_SHARE_READ,
-                NULL,
-                OPEN_EXISTING,
-                0,
-                NULL
-            );
-
-            if (deviceHandle != INVALID_HANDLE_VALUE) {
-                // Отправляем запрос к устройству для получения мощности
-                // Здесь должен быть IOCTL-запрос к USB-устройству для получения энергопотребления
-                CloseHandle(deviceHandle);
-                free(deviceDetailData);
-                SetupDiDestroyDeviceInfoList(deviceInfoSet);
-
-                // Поскольку мы не можем отправить реальный запрос без драйвера, возвращаем фиктивное значение
-                return 2.5; // Пример: 2.5 Вт
-            }
-
-            CloseHandle(deviceHandle);
-        }
-
-        free(deviceDetailData);
-        index++;
-    }
-
-    SetupDiDestroyDeviceInfoList(deviceInfoSet);
-    return -1; // Устройство не найдено или ошибка
-}
